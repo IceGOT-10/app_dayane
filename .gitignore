@@ -1,0 +1,42 @@
+# Arquivo de governança local da IA
+GEMINI.md
+
+# Dependências
+node_modules/
+package-lock.json.backup
+
+# Expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Pastas nativas geradas
+/ios/
+/android/
+.kotlin/
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Metro & Bundler
+.metro-health-check*
+
+# Logs & Debug
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# Variáveis de ambiente locais
+.env
+.env*.local
+
+# TypeScript
+*.tsbuildinfo
+
+# Arquivos do Sistema Operacional
+.DS_Store
+Thumbs.db
