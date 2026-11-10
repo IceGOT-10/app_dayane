@@ -40,3 +40,4 @@ yarn-error.*
 # Arquivos do Sistema Operacional
 .DS_Store
 Thumbs.db
+
