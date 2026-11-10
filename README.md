@@ -59,7 +59,16 @@ Este diário registra as mudanças realizadas no projeto para facilitar a elabor
 - **Documentação de Governança e IA**:
   - Criação do guia contínuo de instruções da IA (`GEMINI.md`) baseado nos requisitos da disciplina da Profª Dayane.
   - Atualização deste `README.md` com mapeamento tecnológico completo e diário de bordo.
-- **Status do Código**: O código-fonte permanece intacto para estudo prévio e validação da equipe antes do início das alterações.
+- **Implementação Fundacional (Etapas 1, 2 e 3)**:
+  - Criação de contratos TypeScript estritos em `meu-app/src/types/ball-management.ts` (`Player`, `Game`, `Guest`, `FinancialMetric`, `AttendanceRecord`).
+  - Implementação do motor de cálculos matemáticos puros (Requisito R5) em `meu-app/src/utils/calculations.ts` (`calculateFinancialSummary`, `calculateGameAttendance`, `calculateCostSharing`, `formatCurrencyBRL`).
+  - Implementação do módulo de validação defensiva e sanitização (Requisito R6) em `meu-app/src/utils/validations.ts` (`validateGuestName`, `validateMonetaryInput`, `validateLoginCredentials`, `validateGuestQuota`).
+  - As telas existentes em `meu-app/src/app/` foram preservadas intactas para integração gradual pela equipe.
+- **Saneamento e Compatibilização de Dependências (Expo SDK 57)**:
+  - Reversão do conflito de dependências gerado por `npm audit fix --force`.
+  - Alinhamento de todos os pacotes nativos para as versões oficiais do Expo SDK 57 via `npx expo install --fix`.
+  - Adição de tipagens ambientais para módulos CSS (`src/types/declarations.d.ts`), garantindo compilação TypeScript com 0 erros (`tsc --noEmit`).
+  - Validação de integridade do ambiente com `expo-doctor` (21/21 verificações aprovadas).
 
 ---
 
@@ -99,7 +108,9 @@ app_dayane/
 │   │   │   └── guests/        # Gestão de convidados
 │   │   ├── components/        # Componentes visuais reutilizáveis
 │   │   ├── constants/         # Cores, temas e dados estáticos
-│   │   └── hooks/             # Custom Hooks (tema, esquema de cores)
+│   │   ├── hooks/             # Custom Hooks (tema, esquema de cores)
+│   │   ├── types/             # Contratos e interfaces TypeScript (ball-management.ts)
+│   │   └── utils/             # Regras de negócio, cálculos (R5) e validações (R6)
 │   ├── app.json               # Configurações do Expo
 │   ├── package.json           # Dependências e scripts
 │   └── tsconfig.json          # Configuração TypeScript
