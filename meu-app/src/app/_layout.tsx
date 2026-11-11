@@ -3,17 +3,24 @@ import '../../global.css';
 import { DarkTheme, DefaultTheme, Tabs, ThemeProvider } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { SymbolView } from 'expo-symbols';
+import { useEffect } from 'react';
 import { StyleSheet, useColorScheme } from 'react-native';
 
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
 import { BrandColors } from '@/constants/theme';
+import { useAppStore } from '@/store/useAppStore';
 
 SplashScreen.preventAutoHideAsync();
 
-const HIDDEN_TAB_BAR_ROUTES = new Set(['login', 'App', 'index', 'explore']);
+const HIDDEN_TAB_BAR_ROUTES = new Set(['login', 'index']);
 
 export default function TabLayout() {
   const colorScheme = useColorScheme();
+  const hydrateStore = useAppStore((state) => state.hydrateStore);
+
+  useEffect(() => {
+    void hydrateStore();
+  }, [hydrateStore]);
 
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
@@ -76,18 +83,10 @@ export default function TabLayout() {
           name="login"
           options={{ href: null, tabBarStyle: styles.tabBarHidden }}
         />
-        <Tabs.Screen
-          name="App"
-          options={{ href: null, tabBarStyle: styles.tabBarHidden }}
-        />
         <Tabs.Screen name="games/[id]" options={{ href: null }} />
         <Tabs.Screen name="guests/index" options={{ href: null }} />
         <Tabs.Screen
           name="index"
-          options={{ href: null, tabBarStyle: styles.tabBarHidden }}
-        />
-        <Tabs.Screen
-          name="explore"
           options={{ href: null, tabBarStyle: styles.tabBarHidden }}
         />
       </Tabs>

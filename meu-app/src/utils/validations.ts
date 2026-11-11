@@ -18,7 +18,7 @@ export interface ValidationResult<T = string> {
   isValid: boolean;
   /** Mensagem explicativa de erro para o usuário (ou `null` quando válido) */
   errorMessage: string | null;
-  /** Valor limpo e formatado, pronto para ser salvo no estado (`useState`) */
+  /** Valor limpo e formatado, pronto para ser salvo no estado (`useState` / `Zustand`) */
   sanitizedValue: T;
 }
 
@@ -34,6 +34,21 @@ const PERSON_NAME_REGEX = /^[A-Za-zÀ-ÖØ-öø-ÿ\s]+$/;
  * exige texto antes do `@`, domínio após o `@`, ponto `.` e extensão com pelo menos 2 letras.
  */
 const EMAIL_FORMAT_REGEX = /^[^\s@]+@[^\s@]+\.[A-Za-z]{2,}$/;
+
+/**
+ * Expressão Regular para data no padrão brasileiro DD/MM/AAAA.
+ */
+export const DATE_BR_REGEX = /^(0[1-9]|[12]\d|3[01])\/(0[1-9]|1[0-2])\/\d{4}$/;
+
+/**
+ * Expressão Regular para horário no formato 24h HH:mm.
+ */
+export const TIME_24H_REGEX = /^([01]\d|2[0-3]):([0-5]\d)$/;
+
+/**
+ * Expressão Regular para telefone brasileiro com DDD (aceita com ou sem parênteses/hífen).
+ */
+export const PHONE_BR_REGEX = /^\(?\d{2}\)?\s?\d{4,5}-?\d{4}$/;
 
 /**
  * 1. VALIDAÇÃO E SANITIZAÇÃO DO NOME DO CONVIDADO (`validateGuestName`)
@@ -231,7 +246,7 @@ export function validateGuestQuota(
   if (safeCount >= maxGuestsPerGame) {
     return {
       isValid: false,
-      errorMessage: `Limite atingido: esta partida já possui o máximo de ${maxGuestsPerGame} convidados permitidos.`,
+      errorMessage: `Limite atingido: esta partida já possui o máximo de ${maxGuestsPerGame} convidados aprovados permitidos.`,
       sanitizedValue: safeCount,
     };
   }
@@ -243,3 +258,54 @@ export function validateGuestQuota(
   };
 }
 
+/**
+ * Extrai a competência Mês/Ano (`MM/AAAA`) a partir de uma data brasileira (`DD/MM/AAAA`).
+ */
+export function extractMonthYear(dateBr: string): string {
+  const parts = (dateBr ?? '').trim().split('/');
+  if (parts.length === 3) {
+    return `${parts[1]}/${parts[2]}`;
+  }
+  return '09/2026';
+}
+
+/**
+ * 5. VALIDAÇÃO DA COTA MENSAL DE CONVIDADO POR SÓCIO (`validateMonthlyGuestQuota`)
+ * Regra estatutária: cada atleta sócio pode cadastrar no máximo 1 convidado ativo (Pendente ou Aprovado)
+ * por mês de competência (`MM/AAAA`).
+ */
+export function validateMonthlyGuestQuota(
+  guests: {
+    id: string;
+    invitedByPlayerId?: string;
+    date: string;
+    status: string;
+  }[],
+  playerId: string,
+  targetDate: string,
+  excludeGuestId?: string
+): ValidationResult<string> {
+  const targetMonthYear = extractMonthYear(targetDate);
+
+  const existingInviteInMonth = guests.find(
+    (g) =>
+      g.id !== excludeGuestId &&
+      g.invitedByPlayerId === playerId &&
+      g.status !== 'Reprovado' &&
+      extractMonthYear(g.date) === targetMonthYear
+  );
+
+  if (existingInviteInMonth) {
+    return {
+      isValid: false,
+      errorMessage: `Limite mensal atingido: você já possui 1 convite ativo (${existingInviteInMonth.status.toLowerCase()}) no mês ${targetMonthYear}. A regra permite no máximo 1 convidado por mês por sócio.`,
+      sanitizedValue: targetMonthYear,
+    };
+  }
+
+  return {
+    isValid: true,
+    errorMessage: null,
+    sanitizedValue: targetMonthYear,
+  };
+}

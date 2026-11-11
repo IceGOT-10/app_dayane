@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import {
   Alert,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -13,10 +14,23 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import {
+  DangerButton,
+  PrimaryButton,
+  SecondaryButton,
+} from '@/components/buttons';
 import { PlayerScreenHeader } from '@/components/player-screen-header';
 import { BrandColors, Fonts, Spacing } from '@/constants/theme';
-import { paymentSchema, type PaymentFormData } from '@/schemas/forms.schema';
+import {
+  paymentSchema,
+  penaltySchema,
+  profileEditSchema,
+  type PaymentFormData,
+  type PenaltyFormData,
+  type ProfileEditFormData,
+} from '@/schemas/forms.schema';
 import { useAppStore } from '@/store/useAppStore';
+import type { PenaltyKind } from '@/types/ball-management';
 import {
   calculateFinancialSummary,
   formatCurrencyBRL,
@@ -25,18 +39,33 @@ import {
 const PROFILE_TABS = ['Perfil', 'Histórico', 'Financeiro'] as const;
 type ProfileTab = (typeof PROFILE_TABS)[number];
 
+const PENALTY_OPTIONS: { kind: PenaltyKind; defaultValue: string }[] = [
+  { kind: 'Cartão Amarelo', defaultValue: '15,00' },
+  { kind: 'Cartão Vermelho', defaultValue: '25,00' },
+  { kind: 'Atraso', defaultValue: '10,00' },
+  { kind: 'Falta sem aviso', defaultValue: '20,00' },
+];
+
 export default function ProfileScreen() {
   const [activeTab, setActiveTab] = useState<ProfileTab>('Perfil');
+  const [editProfileModalVisible, setEditProfileModalVisible] = useState(false);
 
   const currentPlayer = useAppStore((state) => state.currentPlayer);
   const games = useAppStore((state) => state.games);
   const financialMetric = useAppStore((state) => state.financialMetric);
+  const transactions = useAppStore((state) => state.transactions);
+  const updatePlayerProfile = useAppStore((state) => state.updatePlayerProfile);
   const registerPayment = useAppStore((state) => state.registerPayment);
+  const addPenalty = useAppStore((state) => state.addPenalty);
 
   const financialSummary = calculateFinancialSummary(financialMetric);
 
   const playerHistory = games.filter((game) =>
     game.attendance.confirmedPlayers.includes(currentPlayer.name)
+  );
+
+  const playerTransactions = transactions.filter(
+    (tx) => tx.playerId === currentPlayer.id
   );
 
   const profileInfo = [
@@ -68,25 +97,89 @@ export default function ProfileScreen() {
     {
       id: 'status',
       icon: 'verified_user',
-      label: 'Status',
-      value: currentPlayer.membershipStatus,
+      label: 'Status / Papel',
+      value: `${currentPlayer.membershipStatus} (${currentPlayer.role})`,
     },
   ];
 
+  // 1. Formulário de Edição de Perfil
   const {
-    control,
-    handleSubmit,
-    reset,
-    formState: { errors },
+    control: profileControl,
+    handleSubmit: handleProfileSubmit,
+    reset: resetProfileForm,
+    formState: { errors: profileErrors },
+  } = useForm<ProfileEditFormData>({
+    resolver: zodResolver(profileEditSchema),
+    defaultValues: {
+      phone: currentPlayer.phone,
+      position: currentPlayer.position,
+      shirtNumber: String(currentPlayer.shirtNumber),
+    },
+  });
+
+  // 2. Formulário de Pagamento
+  const {
+    control: paymentControl,
+    handleSubmit: handlePaymentSubmit,
+    reset: resetPaymentForm,
+    formState: { errors: paymentErrors },
   } = useForm<PaymentFormData>({
     resolver: zodResolver(paymentSchema),
     defaultValues: {
       amount: '',
+      method: 'PIX',
+      description: '',
     },
   });
 
+  // 3. Formulário de Penalidade / Multa
+  const {
+    control: penaltyControl,
+    handleSubmit: handlePenaltySubmit,
+    setValue: setPenaltyValue,
+    reset: resetPenaltyForm,
+    formState: { errors: penaltyErrors },
+  } = useForm<PenaltyFormData>({
+    resolver: zodResolver(penaltySchema),
+    defaultValues: {
+      kind: 'Cartão Amarelo',
+      amount: '15,00',
+    },
+  });
+
+  const handleOpenEditProfile = () => {
+    resetProfileForm({
+      phone: currentPlayer.phone,
+      position: currentPlayer.position,
+      shirtNumber: String(currentPlayer.shirtNumber),
+    });
+    setEditProfileModalVisible(true);
+  };
+
+  const onSubmitProfileEdit = (data: ProfileEditFormData) => {
+    const result = updatePlayerProfile({
+      phone: data.phone,
+      position: data.position,
+      shirtNumber: Number(data.shirtNumber),
+    });
+
+    if (!result.isValid || !result.sanitizedValue) {
+      Alert.alert(
+        'Erro ao atualizar',
+        result.errorMessage ?? 'Verifique os campos.'
+      );
+      return;
+    }
+
+    setEditProfileModalVisible(false);
+    Alert.alert(
+      'Perfil atualizado!',
+      `Telefone (${result.sanitizedValue.phone}), posição (${result.sanitizedValue.position}) e camisa (#${result.sanitizedValue.shirtNumber}) foram salvos no banco local.`
+    );
+  };
+
   const onSubmitPayment = (data: PaymentFormData) => {
-    const result = registerPayment(data.amount);
+    const result = registerPayment(data.amount, data.method, data.description);
     if (!result.isValid || !result.sanitizedValue) {
       Alert.alert(
         'Erro no pagamento',
@@ -95,10 +188,31 @@ export default function ProfileScreen() {
       return;
     }
 
-    reset({ amount: '' });
+    resetPaymentForm({ amount: '', method: data.method, description: '' });
     Alert.alert(
       'Pagamento registrado',
-      `Amortização confirmada! Saldo devedor atual: ${result.sanitizedValue.formattedBalance} (${result.sanitizedValue.derivedStatus}).`
+      `Amortização via ${data.method} confirmada! Saldo devedor atual: ${result.sanitizedValue.formattedBalance} (${result.sanitizedValue.derivedStatus}).`
+    );
+  };
+
+  const onSubmitPenalty = (data: PenaltyFormData) => {
+    const result = addPenalty({
+      kind: data.kind,
+      rawAmount: data.amount,
+    });
+
+    if (!result.isValid || !result.sanitizedValue) {
+      Alert.alert(
+        'Erro ao lançar penalidade',
+        result.errorMessage ?? 'Verifique o valor da multa.'
+      );
+      return;
+    }
+
+    resetPenaltyForm({ kind: data.kind, amount: data.amount });
+    Alert.alert(
+      'Penalidade registrada',
+      `Infração "${data.kind}" adicionada ao extrato. Novo saldo devedor: ${result.sanitizedValue.formattedBalance} (${result.sanitizedValue.derivedStatus}).`
     );
   };
 
@@ -164,19 +278,28 @@ export default function ProfileScreen() {
                   <Text style={styles.playerRole}>
                     {currentPlayer.position} • #{currentPlayer.shirtNumber}
                   </Text>
+                  <View className="mt-1 self-start">
+                    <SecondaryButton
+                      title="Editar perfil"
+                      onPress={handleOpenEditProfile}
+                    />
+                  </View>
                 </View>
               </View>
+
               <View style={styles.infoCard}>
                 <Text style={styles.cardTitle}>Informações pessoais</Text>
                 {profileInfo.map((info) => (
                   <View key={info.id} style={styles.infoRow}>
                     <View style={styles.infoIcon}>
                       <SymbolView
-                        name={{
-                          ios: info.icon,
-                          android: info.icon,
-                          web: info.icon,
-                        } as never}
+                        name={
+                          {
+                            ios: info.icon,
+                            android: info.icon,
+                            web: info.icon,
+                          } as never
+                        }
                         size={18}
                         tintColor={BrandColors.green}
                       />
@@ -215,6 +338,10 @@ export default function ProfileScreen() {
                     </Text>
                     <Text style={styles.infoLabel}>
                       {game.location} ({game.status})
+                      {game.homeScore !== undefined &&
+                      game.awayScore !== undefined
+                        ? ` • Placar: ${game.homeScore}×${game.awayScore}`
+                        : ''}
                     </Text>
                   </View>
                 </View>
@@ -267,8 +394,8 @@ export default function ProfileScreen() {
                       Cartões e atrasos registrados
                     </Text>
                   </View>
-                  <Text style={styles.financeAmount}>
-                    {formatCurrencyBRL(financialMetric.penaltiesAmount)}
+                  <Text className="text-sm font-bold text-red-600">
+                    + {formatCurrencyBRL(financialMetric.penaltiesAmount)}
                   </Text>
                 </View>
 
@@ -315,17 +442,58 @@ export default function ProfileScreen() {
                 ) : null}
               </View>
 
+              {/* Card: Registrar Pagamento */}
               <View className="mt-4 rounded-lg border border-slate-200 bg-white p-4">
                 <Text className="text-base font-bold text-slate-900">
                   Registrar pagamento
                 </Text>
                 <Text className="mt-1 text-xs text-slate-500">
-                  Informe o valor em Reais (R$) para abater do saldo devedor.
+                  Informe o valor, método e descrição para abater do saldo
+                  devedor e gravar no extrato.
                 </Text>
 
+                <Text className="mb-1.5 mt-3 text-xs font-semibold text-slate-700">
+                  Método de pagamento
+                </Text>
+                <Controller
+                  control={paymentControl}
+                  name="method"
+                  render={({ field: { onChange, value } }) => (
+                    <View className="flex-row gap-2">
+                      {(['PIX', 'Dinheiro', 'Transferência'] as const).map(
+                        (m) => (
+                          <Pressable
+                            key={m}
+                            accessibilityRole="button"
+                            onPress={() => onChange(m)}
+                            className={`flex-1 items-center rounded-lg border py-2 ${
+                              value === m
+                                ? 'border-emerald-700 bg-emerald-50'
+                                : 'border-slate-300 bg-slate-50'
+                            }`}
+                          >
+                            <Text
+                              className={`text-xs font-bold ${
+                                value === m
+                                  ? 'text-emerald-900'
+                                  : 'text-slate-600'
+                              }`}
+                            >
+                              {m}
+                            </Text>
+                          </Pressable>
+                        )
+                      )}
+                    </View>
+                  )}
+                />
+
                 <View className="mt-3">
+                  <Text className="mb-1 text-xs font-semibold text-slate-700">
+                    Valor em Reais (R$)
+                  </Text>
                   <Controller
-                    control={control}
+                    control={paymentControl}
                     name="amount"
                     render={({ field: { onChange, onBlur, value } }) => (
                       <TextInput
@@ -334,8 +502,8 @@ export default function ProfileScreen() {
                         onChangeText={onChange}
                         placeholder="Ex: 45,00"
                         placeholderTextColor={BrandColors.muted}
-                        className={`min-h-[46px] rounded-lg border px-3 text-sm text-slate-900 ${
-                          errors.amount
+                        className={`min-h-[44px] rounded-lg border px-3 text-sm text-slate-900 ${
+                          paymentErrors.amount
                             ? 'border-red-500 bg-red-50/30'
                             : 'border-slate-300 bg-slate-50'
                         }`}
@@ -343,27 +511,270 @@ export default function ProfileScreen() {
                       />
                     )}
                   />
-                  {errors.amount?.message ? (
+                  {paymentErrors.amount?.message ? (
                     <Text className="mt-1.5 text-xs font-medium text-red-600">
-                      {errors.amount.message}
+                      {paymentErrors.amount.message}
                     </Text>
                   ) : null}
                 </View>
 
-                <Pressable
-                  accessibilityRole="button"
-                  onPress={handleSubmit(onSubmitPayment)}
-                  className="mt-3 min-h-[46px] flex-row items-center justify-center rounded-lg bg-emerald-700 px-4"
-                >
-                  <Text className="text-sm font-bold text-white">
-                    Confirmar pagamento
+                <View className="mt-3">
+                  <Text className="mb-1 text-xs font-semibold text-slate-700">
+                    Observação / Descrição (opcional)
                   </Text>
-                </Pressable>
+                  <Controller
+                    control={paymentControl}
+                    name="description"
+                    render={({ field: { onChange, onBlur, value } }) => (
+                      <TextInput
+                        onBlur={onBlur}
+                        onChangeText={onChange}
+                        placeholder="Ex: Quitação mensalidade Setembro"
+                        placeholderTextColor={BrandColors.muted}
+                        className="min-h-[42px] rounded-lg border border-slate-300 bg-slate-50 px-3 text-sm text-slate-900"
+                        value={value}
+                      />
+                    )}
+                  />
+                </View>
+
+                <PrimaryButton
+                  title="Confirmar pagamento"
+                  onPress={handlePaymentSubmit(onSubmitPayment)}
+                  className="mt-3"
+                />
+              </View>
+
+              {/* Card: Lançar Penalidade / Cartão */}
+              <View className="mt-4 rounded-lg border border-red-200 bg-white p-4">
+                <Text className="text-base font-bold text-slate-900">
+                  Lançar penalidade / Cartão disciplinar
+                </Text>
+                <Text className="mt-1 text-xs text-slate-500">
+                  Selecione o tipo de infração para somar automaticamente ao
+                  saldo devedor do atleta.
+                </Text>
+
+                <Controller
+                  control={penaltyControl}
+                  name="kind"
+                  render={({ field: { onChange, value } }) => (
+                    <View className="mt-3 flex-row flex-wrap gap-2">
+                      {PENALTY_OPTIONS.map((item) => {
+                        const selected = value === item.kind;
+                        return (
+                          <Pressable
+                            key={item.kind}
+                            accessibilityRole="button"
+                            onPress={() => {
+                              onChange(item.kind);
+                              setPenaltyValue('amount', item.defaultValue, {
+                                shouldValidate: true,
+                              });
+                            }}
+                            className={`rounded-lg border px-3 py-2 ${
+                              selected
+                                ? 'border-red-600 bg-red-50'
+                                : 'border-slate-300 bg-slate-50'
+                            }`}
+                          >
+                            <Text
+                              className={`text-xs font-bold ${
+                                selected ? 'text-red-800' : 'text-slate-700'
+                              }`}
+                            >
+                              {item.kind} (R$ {item.defaultValue})
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  )}
+                />
+
+                <View className="mt-3">
+                  <Text className="mb-1 text-xs font-semibold text-slate-700">
+                    Valor da multa (R$)
+                  </Text>
+                  <Controller
+                    control={penaltyControl}
+                    name="amount"
+                    render={({ field: { onChange, onBlur, value } }) => (
+                      <TextInput
+                        keyboardType="decimal-pad"
+                        onBlur={onBlur}
+                        onChangeText={onChange}
+                        placeholder="Ex: 15,00"
+                        placeholderTextColor={BrandColors.muted}
+                        className="min-h-[44px] rounded-lg border border-slate-300 bg-slate-50 px-3 text-sm text-slate-900"
+                        value={value}
+                      />
+                    )}
+                  />
+                  {penaltyErrors.amount?.message ? (
+                    <Text className="mt-1 text-xs text-red-600">
+                      {penaltyErrors.amount.message}
+                    </Text>
+                  ) : null}
+                </View>
+
+                <DangerButton
+                  title="Aplicar penalidade"
+                  onPress={handlePenaltySubmit(onSubmitPenalty)}
+                  className="mt-3"
+                />
+              </View>
+
+              {/* Card: Extrato Financeiro Cronológico */}
+              <View className="mt-4 rounded-lg border border-slate-200 bg-white p-4">
+                <Text className="text-base font-bold text-slate-900">
+                  Extrato financeiro ({playerTransactions.length} lançamentos)
+                </Text>
+                <Text className="mt-0.5 text-xs text-slate-500">
+                  Histórico cronológico de pagamentos e multas persistido no
+                  banco local.
+                </Text>
+
+                <View className="mt-3">
+                  {playerTransactions.length === 0 ? (
+                    <Text className="py-4 text-center text-xs text-slate-500">
+                      Nenhuma movimentação registrada para este atleta.
+                    </Text>
+                  ) : (
+                    playerTransactions.map((tx) => {
+                      const isPayment = tx.type === 'payment';
+                      return (
+                        <View
+                          key={tx.id}
+                          className="flex-row items-center justify-between border-t border-slate-100 py-3"
+                        >
+                          <View className="flex-1 pr-2">
+                            <Text className="text-xs font-bold text-slate-800">
+                              {tx.description}
+                            </Text>
+                            <Text className="mt-0.5 text-[11px] text-slate-500">
+                              {tx.createdAt} • {tx.method}
+                            </Text>
+                          </View>
+                          <Text
+                            className={`text-xs font-extrabold ${
+                              isPayment ? 'text-emerald-700' : 'text-red-600'
+                            }`}
+                          >
+                            {isPayment ? '- ' : '+ '}
+                            {formatCurrencyBRL(tx.amount)}
+                          </Text>
+                        </View>
+                      );
+                    })
+                  )}
+                </View>
               </View>
             </>
           )}
         </View>
       </ScrollView>
+
+      {/* Modal: Edição de Perfil do Atleta */}
+      <Modal
+        transparent
+        animationType="fade"
+        visible={editProfileModalVisible}
+        onRequestClose={() => setEditProfileModalVisible(false)}
+      >
+        <View className="flex-1 justify-center bg-black/60 p-4">
+          <View className="w-full max-w-[420px] self-center rounded-xl bg-white p-5">
+            <Text className="text-lg font-bold text-slate-900">
+              Editar Perfil do Atleta
+            </Text>
+            <Text className="mt-1 text-xs text-slate-500">
+              Atualize seu telefone, posição tática e número do colete.
+            </Text>
+
+            <Text className="mb-1 mt-4 text-xs font-semibold text-slate-700">
+              Telefone (com DDD)
+            </Text>
+            <Controller
+              control={profileControl}
+              name="phone"
+              render={({ field: { onChange, onBlur, value } }) => (
+                <TextInput
+                  keyboardType="phone-pad"
+                  onBlur={onBlur}
+                  onChangeText={onChange}
+                  placeholder="(99) 99123-4567"
+                  placeholderTextColor="#94a3b8"
+                  className="min-h-[44px] rounded-lg border border-slate-300 px-3 text-sm text-slate-900"
+                  value={value}
+                />
+              )}
+            />
+            {profileErrors.phone?.message ? (
+              <Text className="mt-1 text-xs text-red-600">
+                {profileErrors.phone.message}
+              </Text>
+            ) : null}
+
+            <Text className="mb-1 mt-3 text-xs font-semibold text-slate-700">
+              Posição em quadra
+            </Text>
+            <Controller
+              control={profileControl}
+              name="position"
+              render={({ field: { onChange, onBlur, value } }) => (
+                <TextInput
+                  onBlur={onBlur}
+                  onChangeText={onChange}
+                  placeholder="Ex: Atacante, Meia, Zagueiro, Goleiro"
+                  placeholderTextColor="#94a3b8"
+                  className="min-h-[44px] rounded-lg border border-slate-300 px-3 text-sm text-slate-900"
+                  value={value}
+                />
+              )}
+            />
+            {profileErrors.position?.message ? (
+              <Text className="mt-1 text-xs text-red-600">
+                {profileErrors.position.message}
+              </Text>
+            ) : null}
+
+            <Text className="mb-1 mt-3 text-xs font-semibold text-slate-700">
+              Número do colete / camisa (1 a 99)
+            </Text>
+            <Controller
+              control={profileControl}
+              name="shirtNumber"
+              render={({ field: { onChange, onBlur, value } }) => (
+                <TextInput
+                  keyboardType="number-pad"
+                  onBlur={onBlur}
+                  onChangeText={onChange}
+                  placeholder="9"
+                  placeholderTextColor="#94a3b8"
+                  className="min-h-[44px] rounded-lg border border-slate-300 px-3 text-sm text-slate-900"
+                  value={value}
+                />
+              )}
+            />
+            {profileErrors.shirtNumber?.message ? (
+              <Text className="mt-1 text-xs text-red-600">
+                {profileErrors.shirtNumber.message}
+              </Text>
+            ) : null}
+
+            <View className="mt-5 flex-row justify-end gap-2">
+              <SecondaryButton
+                title="Cancelar"
+                onPress={() => setEditProfileModalVisible(false)}
+              />
+              <PrimaryButton
+                title="Salvar perfil"
+                onPress={handleProfileSubmit(onSubmitProfileEdit)}
+              />
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -472,7 +883,12 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: BrandColors.border,
   },
-  infoIcon: { width: 30, height: 36, justifyContent: 'center', alignItems: 'flex-start' },
+  infoIcon: {
+    width: 30,
+    height: 36,
+    justifyContent: 'center',
+    alignItems: 'flex-start',
+  },
   infoCopy: { flex: 1, minWidth: 0, gap: 3 },
   infoLabel: {
     color: BrandColors.muted,

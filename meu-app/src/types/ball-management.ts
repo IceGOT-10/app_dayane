@@ -1,7 +1,7 @@
 /**
  * @file ball-management.ts
  * @description Contratos de tipagem estrita (TypeScript) que unificam as entidades de domínio
- * do aplicativo Gestão Bola (Atletas, Partidas, Convidados, Presença e Finanças).
+ * do aplicativo Gestão Bola (Atletas, Partidas, Convidados, Presença, Finanças, Transações e Documentos).
  *
  * OBJETIVO PEDAGÓGICO (Sabatina Profª Dayane):
  * Em TypeScript estrito ("strict": true no tsconfig.json), evitamos o uso de `any` criando
@@ -31,13 +31,37 @@ export type GuestStatus = 'Aprovado' | 'Reprovado' | 'Pendente';
 export type PlayerMembershipStatus = 'Sócio' | 'Mensalista' | 'Diarista';
 
 /**
+ * Union Type para o papel administrativo do atleta no grupo (Atleta comum ou Diretoria/Organizador).
+ */
+export type PlayerRole = 'Diretoria' | 'Atleta';
+
+/**
  * Union Type para a situação cadastral/financeira de um lançamento (`profile.tsx` e `dashboard.tsx`).
  */
 export type FinancialStatus = 'Regular' | 'Em aberto' | 'Atrasado';
 
 /**
+ * Union Type para a natureza de uma transação no extrato financeiro (`payment` = pagamento, `penalty` = multa).
+ */
+export type TransactionType = 'payment' | 'penalty';
+
+/**
+ * Union Type para o meio de pagamento ou origem do lançamento financeiro.
+ */
+export type PaymentMethod = 'PIX' | 'Dinheiro' | 'Transferência' | 'Penalidade';
+
+/**
+ * Union Type para os tipos de penalidade disciplinar aplicáveis aos atletas.
+ */
+export type PenaltyKind =
+  | 'Cartão Amarelo'
+  | 'Cartão Vermelho'
+  | 'Atraso'
+  | 'Falta sem aviso';
+
+/**
  * Interface que representa um Atleta (Jogador) cadastrado no Gestão Bola.
- * Unifica os dados exibidos em `dashboard.tsx` e `profile.tsx`.
+ * Unifica os dados exibidos em `login.tsx`, `dashboard.tsx` e `profile.tsx`.
  */
 export interface Player {
   /** Identificador único do atleta (ex: 'player-01') */
@@ -46,6 +70,8 @@ export interface Player {
   name: string;
   /** Endereço de e-mail usado na autenticação (`login.tsx`) */
   email: string;
+  /** Senha de acesso ao aplicativo persistida no banco local */
+  password: string;
   /** Telefone de contato com DDD no padrão brasileiro (ex: '(99) 99123-4567') */
   phone: string;
   /** Mês/Ano de ingresso no grupo (ex: '08/2023') */
@@ -56,6 +82,8 @@ export interface Player {
   shirtNumber: number;
   /** Modalidade de associação no grupo (define regras de mensalidade vs. diária) */
   membershipStatus: PlayerMembershipStatus;
+  /** Papel organizacional (permite aprovar convites, lançar placares e aplicar multas) */
+  role: PlayerRole;
   /** Indica se o atleta está ativo para ser escalado nas partidas */
   isActive: boolean;
 }
@@ -75,6 +103,8 @@ export interface AttendanceRecord {
   maxCapacity: number;
   /** Lista nominal dos atletas confirmados na escalação */
   confirmedPlayers: string[];
+  /** Lista nominal dos atletas que justificaram ausência */
+  declinedPlayers?: string[];
 }
 
 /**
@@ -105,6 +135,14 @@ export interface Game {
   courtCost: number;
   /** Limite máximo de convidados externos permitidos nesta partida (regra padrão: 2) */
   maxGuestsPerGame: number;
+  /** Placar numérico da equipe mandante (partidas em andamento ou finalizadas) */
+  homeScore?: number;
+  /** Placar numérico da equipe visitante (partidas em andamento ou finalizadas) */
+  awayScore?: number;
+  /** Lista de artilheiros / autores dos gols da partida */
+  scorers?: string[];
+  /** Lista nominal dos atletas que declararam ausência ("Não irei") */
+  declinedPlayers: string[];
   /** Objeto aninhado contendo os números e nomes do controle de presença */
   attendance: AttendanceRecord;
 }
@@ -124,8 +162,10 @@ export interface Guest {
   game: string;
   /** Status de aprovação pela diretoria do grupo ('Aprovado' | 'Reprovado' | 'Pendente') */
   status: GuestStatus;
-  /** ID do atleta sócio responsável pelo convite (opcional para retrocompatibilidade) */
+  /** ID do atleta sócio responsável pelo convite */
   invitedByPlayerId?: string;
+  /** Nome do atleta sócio que realizou o convite */
+  invitedByPlayerName?: string;
   /** Taxa de diária cobrada do convidado em Reais (R$) */
   guestFee?: number;
 }
@@ -153,3 +193,41 @@ export interface FinancialMetric {
   status: FinancialStatus;
 }
 
+/**
+ * Interface que representa um lançamento individual no extrato financeiro (`transactions`).
+ * Registra tanto amortizações/pagamentos quanto penalidades/multas aplicadas.
+ */
+export interface FinancialTransaction {
+  /** Identificador único da transação (ex: 'tx-01') */
+  id: string;
+  /** ID do atleta vinculado ao lançamento */
+  playerId: string;
+  /** Tipo do lançamento: 'payment' (crédito/pagamento) ou 'penalty' (débito/multa) */
+  type: TransactionType;
+  /** Descrição detalhada do lançamento (ex: 'Pagamento via PIX', 'Multa: Cartão Amarelo') */
+  description: string;
+  /** Valor monetário da operação em Reais (R$) */
+  amount: number;
+  /** Método utilizado ('PIX', 'Dinheiro', 'Transferência', 'Penalidade') */
+  method: PaymentMethod;
+  /** Data e hora formatadas do registro (ex: '05/09/2026 19:45') */
+  createdAt: string;
+}
+
+/**
+ * Interface que representa um Documento Oficial do grupo (`documents.tsx`).
+ */
+export interface ClubDocument {
+  /** Identificador único do documento (ex: 'statute') */
+  id: string;
+  /** Título oficial (ex: 'Estatuto Social') */
+  title: string;
+  /** Subtítulo ou categoria documental */
+  category: string;
+  /** Metadado de tamanho e formato (ex: 'PDF • 2,4 MB') */
+  size: string;
+  /** Data da última revisão/aprovação em assembleia */
+  updatedAt: string;
+  /** Texto integral do documento para leitura em tela e exportação em PDF */
+  content: string;
+}
