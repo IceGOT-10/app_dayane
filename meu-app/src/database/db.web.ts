@@ -7,7 +7,7 @@
  * que geram conflitos no empacotador Metro ("Worker chunk not found").
  * A convenção idiomática do React Native / Expo é utilizar arquivos com sufixo de plataforma
  * (`.web.ts` e `.native.ts` / `.ts`). Desta forma, o bundler Web utiliza este arquivo puramente
- * com `AsyncStorage`, eliminando o erro de build e mantendo todas as funcionalidades e persistência.
+ * com `AsyncStorage`, mantendo todas as funcionalidades, hierarquia de perfis e persistência.
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -30,13 +30,13 @@ import type {
 } from '@/types/ball-management';
 
 const STORAGE_KEYS = {
-  PLAYERS: '@gestao_bola:players_v1',
-  GAMES: '@gestao_bola:games_v1',
-  GUESTS: '@gestao_bola:guests_v1',
-  METRICS: '@gestao_bola:metrics_v1',
-  TRANSACTIONS: '@gestao_bola:transactions_v1',
-  DOCUMENTS: '@gestao_bola:documents_v1',
-  SESSION_PLAYER_ID: '@gestao_bola:session_player_id_v1',
+  PLAYERS: '@gestao_bola:players_v2',
+  GAMES: '@gestao_bola:games_v2',
+  GUESTS: '@gestao_bola:guests_v2',
+  METRICS: '@gestao_bola:metrics_v2',
+  TRANSACTIONS: '@gestao_bola:transactions_v2',
+  DOCUMENTS: '@gestao_bola:documents_v2',
+  SESSION_PLAYER_ID: '@gestao_bola:session_player_id_v2',
 } as const;
 
 export interface DatabaseSnapshot {
@@ -161,4 +161,3 @@ export async function loadDatabaseSnapshot(): Promise<DatabaseSnapshot> {
     sessionPlayerId,
   };
 }
-

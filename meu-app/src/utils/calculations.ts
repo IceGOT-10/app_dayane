@@ -92,6 +92,10 @@ export function formatCurrencyBRL(value: number): string {
  * Fórmula Matemática:
  *   Total Bruto = Mensalidade + Penalidades
  *   Saldo Devedor = max(0, Total Bruto - Pagamentos Efetuados)
+ *   Status Derivado:
+ *     - 'Regular': Saldo Devedor == 0
+ *     - 'Atrasado': Saldo Devedor >= 50 e possui multas disciplinares >= R$ 25,00
+ *     - 'Em aberto': Saldo Devedor > 0 nos demais casos
  *
  * @param metric Objeto contendo os valores financeiros do atleta.
  * @returns Objeto tipado `FinancialSummaryResult` com saldos e status atualizado.
@@ -116,9 +120,13 @@ export function calculateFinancialSummary(
   // Se o atleta pagou a mais do que devia, registra como crédito para o mês seguinte
   const creditBalance = netDifference < 0 ? Math.abs(netDifference) : 0;
 
-  // Derivação automática do status financeiro
+  // Derivação automática do status financeiro em três faixas ('Regular', 'Em aberto', 'Atrasado')
   const derivedStatus: FinancialStatus =
-    outstandingBalance === 0 ? 'Regular' : 'Em aberto';
+    outstandingBalance === 0
+      ? 'Regular'
+      : outstandingBalance >= 50 && safePenalties >= 25
+        ? 'Atrasado'
+        : 'Em aberto';
 
   return {
     grossTotal,
@@ -215,4 +223,3 @@ export function calculateCostSharing(
     formattedCostPerAthlete: formatCurrencyBRL(costPerAthlete),
   };
 }
-

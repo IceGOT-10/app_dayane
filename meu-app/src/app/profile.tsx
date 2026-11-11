@@ -35,6 +35,7 @@ import {
   calculateFinancialSummary,
   formatCurrencyBRL,
 } from '@/utils/calculations';
+import { getPlayerPermissions } from '@/utils/validations';
 
 const PROFILE_TABS = ['Perfil', 'Histórico', 'Financeiro'] as const;
 type ProfileTab = (typeof PROFILE_TABS)[number];
@@ -51,6 +52,7 @@ export default function ProfileScreen() {
   const [editProfileModalVisible, setEditProfileModalVisible] = useState(false);
 
   const currentPlayer = useAppStore((state) => state.currentPlayer);
+  const players = useAppStore((state) => state.players);
   const games = useAppStore((state) => state.games);
   const financialMetric = useAppStore((state) => state.financialMetric);
   const transactions = useAppStore((state) => state.transactions);
@@ -58,10 +60,23 @@ export default function ProfileScreen() {
   const registerPayment = useAppStore((state) => state.registerPayment);
   const addPenalty = useAppStore((state) => state.addPenalty);
 
+  const [selectedPenaltyTargetId, setSelectedPenaltyTargetId] = useState<
+    string | null
+  >(null);
+
+  const permissions = getPlayerPermissions(currentPlayer);
+  const activePenaltyTargetId = selectedPenaltyTargetId ?? currentPlayer.id;
+  const activePenaltyTarget =
+    players.find((p) => p.id === activePenaltyTargetId) ?? currentPlayer;
+
   const financialSummary = calculateFinancialSummary(financialMetric);
 
   const playerHistory = games.filter((game) =>
     game.attendance.confirmedPlayers.includes(currentPlayer.name)
+  );
+
+  const declinedHistory = games.filter((game) =>
+    (game.attendance.declinedPlayers ?? []).includes(currentPlayer.name)
   );
 
   const playerTransactions = transactions.filter(
@@ -69,6 +84,12 @@ export default function ProfileScreen() {
   );
 
   const profileInfo = [
+    {
+      id: 'hierarchy',
+      icon: 'military_tech',
+      label: 'Nível Hierárquico e Cargo',
+      value: `Nível ${currentPlayer.hierarchyLevel} • ${currentPlayer.hierarchyTitle}`,
+    },
     { id: 'email', icon: 'mail', label: 'E-mail', value: currentPlayer.email },
     {
       id: 'phone',
@@ -85,19 +106,19 @@ export default function ProfileScreen() {
     {
       id: 'position',
       icon: 'sports_soccer',
-      label: 'Posição',
-      value: currentPlayer.position,
+      label: 'Posição e Pé Dominante',
+      value: `${currentPlayer.position} (${currentPlayer.preferredFoot})`,
     },
     {
       id: 'number',
       icon: 'tag',
       label: 'Número do colete',
-      value: String(currentPlayer.shirtNumber),
+      value: `#${currentPlayer.shirtNumber}`,
     },
     {
       id: 'status',
       icon: 'verified_user',
-      label: 'Status / Papel',
+      label: 'Categoria Associativa',
       value: `${currentPlayer.membershipStatus} (${currentPlayer.role})`,
     },
   ];
@@ -199,11 +220,12 @@ export default function ProfileScreen() {
     const result = addPenalty({
       kind: data.kind,
       rawAmount: data.amount,
+      targetPlayerId: activePenaltyTargetId,
     });
 
     if (!result.isValid || !result.sanitizedValue) {
       Alert.alert(
-        'Erro ao lançar penalidade',
+        'Acesso Negado — Hierarquia',
         result.errorMessage ?? 'Verifique o valor da multa.'
       );
       return;
@@ -212,7 +234,7 @@ export default function ProfileScreen() {
     resetPenaltyForm({ kind: data.kind, amount: data.amount });
     Alert.alert(
       'Penalidade registrada',
-      `Infração "${data.kind}" adicionada ao extrato. Novo saldo devedor: ${result.sanitizedValue.formattedBalance} (${result.sanitizedValue.derivedStatus}).`
+      `Infração "${data.kind}" aplicada a ${activePenaltyTarget.name}. Novo saldo devedor do atleta: ${result.sanitizedValue.formattedBalance} (${result.sanitizedValue.derivedStatus}).`
     );
   };
 
@@ -274,15 +296,66 @@ export default function ProfileScreen() {
                         {currentPlayer.isActive ? 'Ativo' : 'Inativo'}
                       </Text>
                     </View>
+                    <View className="rounded-full bg-slate-900 px-2.5 py-0.5">
+                      <Text className="text-[10px] font-bold text-white">
+                        Nível {currentPlayer.hierarchyLevel}
+                      </Text>
+                    </View>
                   </View>
+                  <Text className="text-xs font-semibold text-emerald-800">
+                    {currentPlayer.hierarchyTitle}
+                  </Text>
                   <Text style={styles.playerRole}>
-                    {currentPlayer.position} • #{currentPlayer.shirtNumber}
+                    {currentPlayer.position} • #{currentPlayer.shirtNumber} •{' '}
+                    {currentPlayer.preferredFoot}
                   </Text>
                   <View className="mt-1 self-start">
                     <SecondaryButton
                       title="Editar perfil"
                       onPress={handleOpenEditProfile}
                     />
+                  </View>
+                </View>
+              </View>
+
+              <View className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50/70 p-3.5">
+                <Text className="text-xs font-bold uppercase tracking-wider text-emerald-900">
+                  Ficha Técnica e Biografia do Perfil
+                </Text>
+                <Text className="mt-1 text-xs leading-5 text-slate-700">
+                  {currentPlayer.profileBio}
+                </Text>
+                <View className="mt-3 flex-row gap-2">
+                  <View className="flex-1 rounded-md border border-emerald-200 bg-white p-2">
+                    <Text className="text-[10px] font-semibold text-slate-500">
+                      Gols na Temporada
+                    </Text>
+                    <Text className="text-base font-extrabold text-emerald-800">
+                      {currentPlayer.goalsScored} gols
+                    </Text>
+                  </View>
+                  <View className="flex-1 rounded-md border border-emerald-200 bg-white p-2">
+                    <Text className="text-[10px] font-semibold text-slate-500">
+                      Jogos Disputados
+                    </Text>
+                    <Text className="text-base font-extrabold text-slate-900">
+                      {currentPlayer.gamesPlayed} partidas
+                    </Text>
+                  </View>
+                  <View className="flex-1 rounded-md border border-emerald-200 bg-white p-2">
+                    <Text className="text-[10px] font-semibold text-slate-500">
+                      Média de Gols
+                    </Text>
+                    <Text className="text-base font-extrabold text-slate-900">
+                      {currentPlayer.gamesPlayed > 0
+                        ? (
+                            currentPlayer.goalsScored /
+                            currentPlayer.gamesPlayed
+                          )
+                            .toFixed(2)
+                            .replace('.', ',')
+                        : '0,00'}
+                    </Text>
                   </View>
                 </View>
               </View>
@@ -317,36 +390,87 @@ export default function ProfileScreen() {
           )}
 
           {activeTab === 'Histórico' && (
-            <View style={styles.infoCard}>
-              <Text style={styles.cardTitle}>
-                Jogos confirmados ({playerHistory.length})
-              </Text>
-              {playerHistory.map((game) => (
-                <View key={game.id} style={styles.historyRow}>
-                  <SymbolView
-                    name={{
-                      ios: 'soccerball',
-                      android: 'sports_soccer',
-                      web: 'sports_soccer',
-                    }}
-                    size={18}
-                    tintColor={BrandColors.green}
-                  />
-                  <View className="flex-1">
-                    <Text style={styles.infoValue}>
-                      {game.title} • {game.date}
-                    </Text>
-                    <Text style={styles.infoLabel}>
-                      {game.location} ({game.status})
-                      {game.homeScore !== undefined &&
-                      game.awayScore !== undefined
-                        ? ` • Placar: ${game.homeScore}×${game.awayScore}`
-                        : ''}
-                    </Text>
-                  </View>
-                </View>
-              ))}
-            </View>
+            <>
+              <View style={styles.infoCard}>
+                <Text style={styles.cardTitle}>
+                  Jogos confirmados ({playerHistory.length})
+                </Text>
+                {playerHistory.length === 0 ? (
+                  <Text className="py-4 text-xs text-slate-500">
+                    Nenhuma presença confirmada até o momento.
+                  </Text>
+                ) : (
+                  playerHistory.map((game) => {
+                    const playerGoalRecord = (game.scorers ?? []).find((s) =>
+                      s.startsWith(currentPlayer.name)
+                    );
+                    return (
+                      <View key={game.id} style={styles.historyRow}>
+                        <SymbolView
+                          name={{
+                            ios: 'soccerball',
+                            android: 'sports_soccer',
+                            web: 'sports_soccer',
+                          }}
+                          size={18}
+                          tintColor={BrandColors.green}
+                        />
+                        <View className="flex-1 py-2">
+                          <Text style={styles.infoValue}>
+                            {game.title} • {game.date}
+                          </Text>
+                          <Text style={styles.infoLabel}>
+                            {game.location} ({game.status})
+                            {game.homeScore !== undefined &&
+                            game.awayScore !== undefined
+                              ? ` • Placar: ${game.homeScore}×${game.awayScore}`
+                              : ''}
+                          </Text>
+                          {playerGoalRecord ? (
+                            <Text className="mt-0.5 text-[11px] font-bold text-emerald-700">
+                              ⚽ Artilharia registrada: {playerGoalRecord}
+                            </Text>
+                          ) : null}
+                        </View>
+                      </View>
+                    );
+                  })
+                )}
+              </View>
+
+              <View style={styles.infoCard}>
+                <Text style={styles.cardTitle}>
+                  Ausências justificadas ({declinedHistory.length})
+                </Text>
+                {declinedHistory.length === 0 ? (
+                  <Text className="pb-4 text-xs text-slate-500">
+                    Nenhuma ausência justificada registrada para este perfil.
+                  </Text>
+                ) : (
+                  declinedHistory.map((game) => (
+                    <View key={game.id} style={styles.historyRow}>
+                      <SymbolView
+                        name={{
+                          ios: 'xmark.circle.fill',
+                          android: 'cancel',
+                          web: 'cancel',
+                        }}
+                        size={18}
+                        tintColor={BrandColors.red}
+                      />
+                      <View className="flex-1 py-2">
+                        <Text style={styles.infoValue}>
+                          {game.title} • {game.date}
+                        </Text>
+                        <Text className="text-[11px] font-medium text-red-600">
+                          Ausência comunicada previamente (&quot;Não irei&quot;)
+                        </Text>
+                      </View>
+                    </View>
+                  ))
+                )}
+              </View>
+            </>
           )}
 
           {activeTab === 'Financeiro' && (
@@ -360,14 +484,18 @@ export default function ProfileScreen() {
                     className={`rounded-full px-3 py-1 ${
                       financialSummary.derivedStatus === 'Regular'
                         ? 'bg-emerald-100'
-                        : 'bg-amber-100'
+                        : financialSummary.derivedStatus === 'Atrasado'
+                          ? 'bg-red-100'
+                          : 'bg-amber-100'
                     }`}
                   >
                     <Text
                       className={`text-xs font-bold ${
                         financialSummary.derivedStatus === 'Regular'
                           ? 'text-emerald-800'
-                          : 'text-amber-800'
+                          : financialSummary.derivedStatus === 'Atrasado'
+                            ? 'text-red-800'
+                            : 'text-amber-800'
                       }`}
                     >
                       {financialSummary.derivedStatus}
@@ -377,8 +505,11 @@ export default function ProfileScreen() {
 
                 <View style={styles.financeRow}>
                   <View style={styles.financeCopy}>
-                    <Text style={styles.infoValue}>Mensalidade base</Text>
-                    <Text style={styles.infoLabel}>Cota mensal do grupo</Text>
+                    <Text style={styles.infoValue}>Mensalidade / Cota base</Text>
+                    <Text style={styles.infoLabel}>
+                      Categoria: {currentPlayer.membershipStatus} (Nível{' '}
+                      {currentPlayer.hierarchyLevel})
+                    </Text>
                   </View>
                   <Text style={styles.financeAmount}>
                     {formatCurrencyBRL(financialMetric.monthlyFee)}
@@ -391,7 +522,7 @@ export default function ProfileScreen() {
                       Penalidades ativas ({financialMetric.penaltiesCount})
                     </Text>
                     <Text style={styles.infoLabel}>
-                      Cartões e atrasos registrados
+                      Cartões e atrasos registrados no perfil
                     </Text>
                   </View>
                   <Text className="text-sm font-bold text-red-600">
@@ -423,9 +554,11 @@ export default function ProfileScreen() {
                   </View>
                   <Text
                     className={`text-base font-extrabold ${
-                      financialSummary.outstandingBalance > 0
-                        ? 'text-amber-700'
-                        : 'text-emerald-700'
+                      financialSummary.derivedStatus === 'Atrasado'
+                        ? 'text-red-700'
+                        : financialSummary.outstandingBalance > 0
+                          ? 'text-amber-700'
+                          : 'text-emerald-700'
                     }`}
                   >
                     {financialSummary.formattedBalance}
@@ -445,11 +578,11 @@ export default function ProfileScreen() {
               {/* Card: Registrar Pagamento */}
               <View className="mt-4 rounded-lg border border-slate-200 bg-white p-4">
                 <Text className="text-base font-bold text-slate-900">
-                  Registrar pagamento
+                  Registrar pagamento próprio
                 </Text>
                 <Text className="mt-1 text-xs text-slate-500">
-                  Informe o valor, método e descrição para abater do saldo
-                  devedor e gravar no extrato.
+                  Informe o valor, método e descrição para abater do seu saldo
+                  devedor e gravar no extrato de {currentPlayer.name}.
                 </Text>
 
                 <Text className="mb-1.5 mt-3 text-xs font-semibold text-slate-700">
@@ -545,85 +678,164 @@ export default function ProfileScreen() {
                 />
               </View>
 
-              {/* Card: Lançar Penalidade / Cartão */}
-              <View className="mt-4 rounded-lg border border-red-200 bg-white p-4">
-                <Text className="text-base font-bold text-slate-900">
-                  Lançar penalidade / Cartão disciplinar
-                </Text>
-                <Text className="mt-1 text-xs text-slate-500">
-                  Selecione o tipo de infração para somar automaticamente ao
-                  saldo devedor do atleta.
-                </Text>
+              {/* Card: Lançar Penalidade / Cartão (Restrito ao Nível 1 - Diretoria) */}
+              {permissions.canApplyPenalties ? (
+                <View className="mt-4 rounded-lg border border-red-200 bg-white p-4">
+                  <View className="flex-row items-center justify-between">
+                    <Text className="text-base font-bold text-slate-900">
+                      Lançar penalidade disciplinar
+                    </Text>
+                    <View className="rounded-full bg-red-100 px-2.5 py-0.5">
+                      <Text className="text-[10px] font-bold text-red-800">
+                        Nível 1 • Diretoria
+                      </Text>
+                    </View>
+                  </View>
+                  <Text className="mt-1 text-xs text-slate-500">
+                    Exclusivo da Diretoria: escolha o atleta infrator e o tipo
+                    de multa para somar ao saldo devedor dele.
+                  </Text>
 
-                <Controller
-                  control={penaltyControl}
-                  name="kind"
-                  render={({ field: { onChange, value } }) => (
-                    <View className="mt-3 flex-row flex-wrap gap-2">
-                      {PENALTY_OPTIONS.map((item) => {
-                        const selected = value === item.kind;
-                        return (
-                          <Pressable
-                            key={item.kind}
-                            accessibilityRole="button"
-                            onPress={() => {
-                              onChange(item.kind);
-                              setPenaltyValue('amount', item.defaultValue, {
-                                shouldValidate: true,
-                              });
-                            }}
-                            className={`rounded-lg border px-3 py-2 ${
-                              selected
-                                ? 'border-red-600 bg-red-50'
-                                : 'border-slate-300 bg-slate-50'
+                  <Text className="mb-1.5 mt-3 text-xs font-semibold text-slate-700">
+                    Atleta autuado
+                  </Text>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={{ gap: 8 }}
+                  >
+                    {players.map((p) => {
+                      const isTarget = p.id === activePenaltyTargetId;
+                      return (
+                        <Pressable
+                          key={p.id}
+                          accessibilityRole="button"
+                          onPress={() => setSelectedPenaltyTargetId(p.id)}
+                          className={`rounded-lg border px-3 py-2 ${
+                            isTarget
+                              ? 'border-slate-900 bg-slate-900'
+                              : 'border-slate-300 bg-slate-50'
+                          }`}
+                        >
+                          <Text
+                            className={`text-xs font-bold ${
+                              isTarget ? 'text-white' : 'text-slate-700'
                             }`}
                           >
-                            <Text
-                              className={`text-xs font-bold ${
-                                selected ? 'text-red-800' : 'text-slate-700'
-                              }`}
-                            >
-                              {item.kind} (R$ {item.defaultValue})
-                            </Text>
-                          </Pressable>
-                        );
-                      })}
-                    </View>
-                  )}
-                />
+                            {p.name.split(' ')[0]} (Nível {p.hierarchyLevel})
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </ScrollView>
 
-                <View className="mt-3">
-                  <Text className="mb-1 text-xs font-semibold text-slate-700">
-                    Valor da multa (R$)
+                  <Text className="mb-1 mt-3 text-xs font-semibold text-slate-700">
+                    Tipo de infração
                   </Text>
                   <Controller
                     control={penaltyControl}
-                    name="amount"
-                    render={({ field: { onChange, onBlur, value } }) => (
-                      <TextInput
-                        keyboardType="decimal-pad"
-                        onBlur={onBlur}
-                        onChangeText={onChange}
-                        placeholder="Ex: 15,00"
-                        placeholderTextColor={BrandColors.muted}
-                        className="min-h-[44px] rounded-lg border border-slate-300 bg-slate-50 px-3 text-sm text-slate-900"
-                        value={value}
-                      />
+                    name="kind"
+                    render={({ field: { onChange, value } }) => (
+                      <View className="flex-row flex-wrap gap-2">
+                        {PENALTY_OPTIONS.map((item) => {
+                          const selected = value === item.kind;
+                          return (
+                            <Pressable
+                              key={item.kind}
+                              accessibilityRole="button"
+                              onPress={() => {
+                                onChange(item.kind);
+                                setPenaltyValue('amount', item.defaultValue, {
+                                  shouldValidate: true,
+                                });
+                              }}
+                              className={`rounded-lg border px-3 py-2 ${
+                                selected
+                                  ? 'border-red-600 bg-red-50'
+                                  : 'border-slate-300 bg-slate-50'
+                              }`}
+                            >
+                              <Text
+                                className={`text-xs font-bold ${
+                                  selected ? 'text-red-800' : 'text-slate-700'
+                                }`}
+                              >
+                                {item.kind} (R$ {item.defaultValue})
+                              </Text>
+                            </Pressable>
+                          );
+                        })}
+                      </View>
                     )}
                   />
-                  {penaltyErrors.amount?.message ? (
-                    <Text className="mt-1 text-xs text-red-600">
-                      {penaltyErrors.amount.message}
-                    </Text>
-                  ) : null}
-                </View>
 
-                <DangerButton
-                  title="Aplicar penalidade"
-                  onPress={handlePenaltySubmit(onSubmitPenalty)}
-                  className="mt-3"
-                />
-              </View>
+                  <View className="mt-3">
+                    <Text className="mb-1 text-xs font-semibold text-slate-700">
+                      Valor da multa (R$) para {activePenaltyTarget.name}
+                    </Text>
+                    <Controller
+                      control={penaltyControl}
+                      name="amount"
+                      render={({ field: { onChange, onBlur, value } }) => (
+                        <TextInput
+                          keyboardType="decimal-pad"
+                          onBlur={onBlur}
+                          onChangeText={onChange}
+                          placeholder="Ex: 15,00"
+                          placeholderTextColor={BrandColors.muted}
+                          className="min-h-[44px] rounded-lg border border-slate-300 bg-slate-50 px-3 text-sm text-slate-900"
+                          value={value}
+                        />
+                      )}
+                    />
+                    {penaltyErrors.amount?.message ? (
+                      <Text className="mt-1 text-xs text-red-600">
+                        {penaltyErrors.amount.message}
+                      </Text>
+                    ) : null}
+                  </View>
+
+                  <DangerButton
+                    title={`Aplicar multa em ${activePenaltyTarget.name.split(' ')[0]}`}
+                    onPress={handlePenaltySubmit(onSubmitPenalty)}
+                    className="mt-3"
+                  />
+                </View>
+              ) : (
+                <View className="mt-4 rounded-lg border border-amber-300 bg-amber-50 p-4">
+                  <View className="flex-row items-center justify-between">
+                    <Text className="text-sm font-bold text-amber-950">
+                      🔒 Aplicação de Multas e Cartões
+                    </Text>
+                    <View className="rounded-full bg-amber-200 px-2.5 py-0.5">
+                      <Text className="text-[10px] font-bold text-amber-950">
+                        Restrito ao Nível 1
+                      </Text>
+                    </View>
+                  </View>
+                  <Text className="mt-1.5 text-xs leading-5 text-amber-900">
+                    Seu perfil ({currentPlayer.name} — Nível{' '}
+                    {currentPlayer.hierarchyLevel}:{' '}
+                    {currentPlayer.hierarchyTitle}) não possui permissão para
+                    aplicar multas ou cartões disciplinares. Apenas membros da
+                    Diretoria (Nível 1) podem autuar atletas.
+                  </Text>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() =>
+                      Alert.alert(
+                        'Acesso Negado — Hierarquia',
+                        `Seu perfil (${currentPlayer.name} — Nível ${currentPlayer.hierarchyLevel}: ${currentPlayer.hierarchyTitle}) não tem acesso ao lançamento de penalidades.\n\nEsta funcionalidade é exclusiva da Diretoria (Nível 1 - Presidente e Tesoureiro).`
+                      )
+                    }
+                    className="mt-3 self-start rounded-lg border border-amber-400 bg-white px-3 py-2"
+                  >
+                    <Text className="text-xs font-bold text-amber-900">
+                      🔒 Verificar restrição de acesso
+                    </Text>
+                  </Pressable>
+                </View>
+              )}
 
               {/* Card: Extrato Financeiro Cronológico */}
               <View className="mt-4 rounded-lg border border-slate-200 bg-white p-4">

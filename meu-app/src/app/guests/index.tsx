@@ -1,4 +1,5 @@
 import { zodResolver } from '@hookform/resolvers/zod';
+import { useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
@@ -26,10 +27,12 @@ import { guestSchema, type GuestFormData } from '@/schemas/forms.schema';
 import { useAppStore } from '@/store/useAppStore';
 import type { Guest, GuestStatus } from '@/types/ball-management';
 import { formatCurrencyBRL } from '@/utils/calculations';
+import { getPlayerPermissions } from '@/utils/validations';
 
-type GuestFilter = 'Todos' | GuestStatus;
+type GuestFilter = 'Todos' | 'Meus' | GuestStatus;
 const GUEST_FILTERS: GuestFilter[] = [
   'Todos',
+  'Meus',
   'Aprovado',
   'Pendente',
   'Reprovado',
@@ -55,6 +58,7 @@ function getStatusBadgeStyles(status: GuestStatus) {
 }
 
 export default function GuestsScreen() {
+  const router = useRouter();
   const guests = useAppStore((state) => state.guests);
   const games = useAppStore((state) => state.games);
   const currentPlayer = useAppStore((state) => state.currentPlayer);
@@ -62,6 +66,8 @@ export default function GuestsScreen() {
   const updateGuest = useAppStore((state) => state.updateGuest);
   const setGuestStatus = useAppStore((state) => state.setGuestStatus);
   const deleteGuest = useAppStore((state) => state.deleteGuest);
+
+  const permissions = getPlayerPermissions(currentPlayer);
 
   const [activeFilter, setActiveFilter] = useState<GuestFilter>('Todos');
   const [modalVisible, setModalVisible] = useState(false);
@@ -103,9 +109,88 @@ export default function GuestsScreen() {
     },
   });
 
-  const visibleGuests = guests.filter(
-    (guest) => activeFilter === 'Todos' || guest.status === activeFilter
-  );
+  // Bloqueio integral de tela para Nível 4 (Diarista) que não possui acesso aos convites
+  if (!permissions.canAccessGuests) {
+    return (
+      <SafeAreaView edges={['top']} style={styles.safeArea}>
+        <PlayerScreenHeader title="Gestão Bola" showBrand />
+        <View className="flex-1 items-center justify-center p-6">
+          <View className="w-full max-w-[440px] items-center rounded-xl border border-red-200 bg-white p-6">
+            <View className="mb-3 h-16 w-16 items-center justify-center rounded-full bg-red-100">
+              <SymbolView
+                name={{ ios: 'lock.fill', android: 'lock', web: 'lock' }}
+                size={30}
+                tintColor={BrandColors.red}
+              />
+            </View>
+            <View className="rounded-full bg-red-50 px-3 py-1">
+              <Text className="text-xs font-bold text-red-700">
+                {permissions.hierarchyLabel}
+              </Text>
+            </View>
+            <Text className="mt-3 text-center text-lg font-bold text-slate-900">
+              Você não tem acesso a Convidados
+            </Text>
+            <Text className="mt-2 text-center text-xs leading-5 text-slate-600">
+              Olá, {currentPlayer.name}! Seu perfil atual é{' '}
+              <Text className="font-bold text-slate-900">
+                {currentPlayer.membershipStatus} ({currentPlayer.role})
+              </Text>
+              . Conforme a hierarquia da Associação Gestão Bola, atletas da
+              categoria Diarista não têm acesso à lista de convidados e não
+              podem enviar convites.
+            </Text>
+            <View className="mt-4 w-full rounded-lg bg-slate-50 p-3">
+              <Text className="text-[11px] font-bold text-slate-800">
+                Hierarquia de acesso a Convidados:
+              </Text>
+              <Text className="mt-1 text-[11px] text-slate-600">
+                • Nível 1 (Diretoria): Cria, aprova, reprova e exclui convites.
+              </Text>
+              <Text className="mt-0.5 text-[11px] text-slate-600">
+                • Nível 2 (Sócio): Acessa e envia até 1 convite/mês (Pendente).
+              </Text>
+              <Text className="mt-0.5 text-[11px] text-slate-600">
+                • Nível 3 (Mensalista): Apenas visualiza convidados (sem
+                convidar).
+              </Text>
+              <Text className="mt-0.5 text-[11px] font-bold text-red-700">
+                • Nível 4 (Diarista — Seu Perfil): Sem acesso ao módulo.
+              </Text>
+            </View>
+            <PrimaryButton
+              title="Voltar ao painel inicial"
+              onPress={() => router.replace('/dashboard')}
+              className="mt-5 w-full"
+            />
+          </View>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  const visibleGuests = guests.filter((guest) => {
+    if (activeFilter === 'Todos') return true;
+    if (activeFilter === 'Meus') {
+      return guest.invitedByPlayerId === currentPlayer.id;
+    }
+    return guest.status === activeFilter;
+  });
+
+  const handleOpenNewInviteModal = () => {
+    if (!permissions.canInviteGuests) {
+      Alert.alert(
+        'Sem Permissão para Convidar',
+        `Olá, ${currentPlayer.name}!\n\nSeu perfil atual (${permissions.hierarchyLabel}) permite apenas consultar a lista de convidados das partidas.\n\nSomente atletas das categorias Sócio (Nível 2) e Diretoria (Nível 1) possuem direito a indicar convidados.`
+      );
+      return;
+    }
+
+    setInitialStatusChoice(
+      permissions.canApproveGuests ? 'Aprovado' : 'Pendente'
+    );
+    setModalVisible(true);
+  };
 
   const onSubmitNewGuest = (data: GuestFormData) => {
     const result = addGuest({
@@ -131,8 +216,8 @@ export default function GuestsScreen() {
     setModalVisible(false);
     Alert.alert(
       result.sanitizedValue.status === 'Aprovado'
-        ? 'Convite aprovado'
-        : 'Convite enviado para análise',
+        ? 'Convite aprovado pela Diretoria'
+        : 'Convite enviado para aprovação',
       `${result.sanitizedValue.name} foi registrado em "${data.game}" com status "${result.sanitizedValue.status}" (taxa diarista: ${formatCurrencyBRL(
         result.sanitizedValue.guestFee ?? 20
       )}).`
@@ -145,6 +230,33 @@ export default function GuestsScreen() {
   };
 
   const handleOpenEditModal = (guest: Guest) => {
+    // Nível 3 (Mensalista): somente leitura
+    if (!permissions.canInviteGuests) {
+      Alert.alert(
+        'Acesso Somente Leitura (Nível 3)',
+        `Seu perfil (${permissions.hierarchyLabel}) permite visualizar os convidados, mas não possui permissão para editar, aprovar ou excluir convites.`
+      );
+      return;
+    }
+
+    // Nível 2 (Sócio): só pode mexer nos seus próprios convites enquanto estiverem Pendentes
+    if (!permissions.canApproveGuests) {
+      if (guest.invitedByPlayerId !== currentPlayer.id) {
+        Alert.alert(
+          'Permissão Restrita',
+          `Este convite foi enviado por ${guest.invitedByPlayerName ?? 'outro sócio'}. Como Sócio (Nível 2), você só pode editar ou cancelar convites enviados por você mesmo.`
+        );
+        return;
+      }
+      if (guest.status !== 'Pendente') {
+        Alert.alert(
+          `Convite já ${guest.status}`,
+          `Este convite já foi avaliado pela Diretoria (${guest.status}). Apenas membros da Diretoria Executiva (Nível 1) podem alterar convites já avaliados.`
+        );
+        return;
+      }
+    }
+
     setSelectedGuest(guest);
     resetEdit({
       name: guest.name,
@@ -184,6 +296,14 @@ export default function GuestsScreen() {
 
   const handleChangeGuestStatus = (status: GuestStatus) => {
     if (!selectedGuest) return;
+    if (!permissions.canApproveGuests) {
+      Alert.alert(
+        'Restrito à Diretoria (Nível 1)',
+        'Apenas membros da Diretoria Executiva podem aprovar ou reprovar convites.'
+      );
+      return;
+    }
+
     const result = setGuestStatus(selectedGuest.id, status);
     if (!result.isValid || !result.sanitizedValue) {
       Alert.alert(
@@ -214,7 +334,14 @@ export default function GuestsScreen() {
           text: 'Excluir',
           style: 'destructive',
           onPress: () => {
-            deleteGuest(target.id);
+            const res = deleteGuest(target.id);
+            if (!res.isValid) {
+              Alert.alert(
+                'Permissão negada',
+                res.errorMessage ?? 'Não foi possível excluir.'
+              );
+              return;
+            }
             setSelectedGuest(null);
           },
         },
@@ -233,25 +360,60 @@ export default function GuestsScreen() {
           <View>
             <PlayerScreenHeader title="Gestão Bola" showBrand />
             <View style={styles.topContent}>
-              <Text style={styles.title}>Convidados</Text>
+              <View className="flex-row items-center justify-between">
+                <Text style={styles.title}>Convidados</Text>
+                <View className="rounded-full bg-slate-900 px-3 py-1">
+                  <Text className="text-[11px] font-bold text-amber-400">
+                    {permissions.hierarchyLabel}
+                  </Text>
+                </View>
+              </View>
               <Text style={styles.subtitle}>
                 1 convidado por mês por sócio • máx. 2 aprovados por jogo
               </Text>
-              <Text className="mt-1 text-xs font-medium text-emerald-800">
-                Toque em qualquer card para editar, aprovar/reprovar ou excluir.
-              </Text>
+
+              {/* Banner explicativo do nível hierárquico atual na tela de Convidados */}
+              <View
+                className={`mt-2.5 rounded-lg border p-3 ${
+                  permissions.canApproveGuests
+                    ? 'border-emerald-200 bg-emerald-50'
+                    : permissions.canInviteGuests
+                      ? 'border-blue-200 bg-blue-50'
+                      : 'border-amber-200 bg-amber-50'
+                }`}
+              >
+                <Text
+                  className={`text-xs font-bold ${
+                    permissions.canApproveGuests
+                      ? 'text-emerald-900'
+                      : permissions.canInviteGuests
+                        ? 'text-blue-900'
+                        : 'text-amber-900'
+                  }`}
+                >
+                  {permissions.canApproveGuests
+                    ? 'Acesso Total de Diretoria (Nível 1): Você pode criar, aprovar, reprovar, editar e excluir qualquer convite.'
+                    : permissions.canInviteGuests
+                      ? 'Acesso de Sócio (Nível 2): Você pode enviar até 1 convite/mês (entra como Pendente para aprovação da Diretoria) e editar/cancelar seus convites pendentes.'
+                      : 'Modo Somente Leitura (Nível 3 — Mensalista): Você não tem permissão para fazer convites nem editar registros. Apenas Sócios e Diretoria podem convidar.'}
+                </Text>
+              </View>
+
               <PrimaryButton
-                title="Novo convite"
-                onPress={() => {
-                  setInitialStatusChoice(
-                    currentPlayer.role === 'Diretoria' ? 'Aprovado' : 'Pendente'
-                  );
-                  setModalVisible(true);
-                }}
+                title={
+                  permissions.canInviteGuests
+                    ? 'Novo convite'
+                    : '🔒 Novo convite (Exclusivo Sócio/Diretoria)'
+                }
+                onPress={handleOpenNewInviteModal}
                 className="mt-3"
                 leftIcon={
                   <SymbolView
-                    name={{ ios: 'plus', android: 'add', web: 'add' }}
+                    name={{
+                      ios: permissions.canInviteGuests ? 'plus' : 'lock.fill',
+                      android: permissions.canInviteGuests ? 'add' : 'lock',
+                      web: permissions.canInviteGuests ? 'add' : 'lock',
+                    }}
                     size={18}
                     tintColor={BrandColors.surface}
                   />
@@ -279,7 +441,11 @@ export default function GuestsScreen() {
                         activeFilter === filter && styles.filterTextActive,
                       ]}
                     >
-                      {filter === 'Todos' ? filter : `${filter}s`}
+                      {filter === 'Todos'
+                        ? 'Todos'
+                        : filter === 'Meus'
+                          ? 'Meus convites'
+                          : `${filter}s`}
                     </Text>
                   </Pressable>
                 ))}
@@ -294,6 +460,8 @@ export default function GuestsScreen() {
         }
         renderItem={({ item }) => {
           const badgeStyle = getStatusBadgeStyles(item.status);
+          const isMyInvite = item.invitedByPlayerId === currentPlayer.id;
+
           return (
             <Pressable
               accessibilityRole="button"
@@ -309,6 +477,7 @@ export default function GuestsScreen() {
                 <View style={styles.guestTopline}>
                   <Text numberOfLines={1} style={styles.guestName}>
                     {item.name}
+                    {isMyInvite ? ' (Seu convite)' : ''}
                   </Text>
                   <View style={[styles.statusBadge, badgeStyle.container]}>
                     <Text style={[styles.statusText, badgeStyle.text]}>
@@ -342,11 +511,23 @@ export default function GuestsScreen() {
               </View>
               <SymbolView
                 name={{
-                  ios: 'chevron.right',
-                  android: 'chevron_right',
-                  web: 'chevron_right',
+                  ios:
+                    permissions.canApproveGuests ||
+                    (isMyInvite && item.status === 'Pendente')
+                      ? 'chevron.right'
+                      : 'lock.fill',
+                  android:
+                    permissions.canApproveGuests ||
+                    (isMyInvite && item.status === 'Pendente')
+                      ? 'chevron_right'
+                      : 'lock',
+                  web:
+                    permissions.canApproveGuests ||
+                    (isMyInvite && item.status === 'Pendente')
+                      ? 'chevron_right'
+                      : 'lock',
                 }}
-                size={17}
+                size={16}
                 tintColor={BrandColors.muted}
               />
             </Pressable>
@@ -365,7 +546,7 @@ export default function GuestsScreen() {
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>Novo convite</Text>
             <Text className="mt-1 text-xs text-slate-500">
-              Sócio responsável: {currentPlayer.name} ({currentPlayer.role})
+              Sócio responsável: {currentPlayer.name} ({permissions.hierarchyLabel})
             </Text>
 
             <Text style={styles.inputLabel}>Partida vinculada</Text>
@@ -446,28 +627,44 @@ export default function GuestsScreen() {
 
             <Text style={styles.inputLabel}>Status inicial do convite</Text>
             <View className="flex-row gap-2">
-              {(['Pendente', 'Aprovado'] as const).map((statusOption) => (
-                <Pressable
-                  key={statusOption}
-                  accessibilityRole="button"
-                  onPress={() => setInitialStatusChoice(statusOption)}
-                  className={`flex-1 items-center rounded-md border py-2 ${
-                    initialStatusChoice === statusOption
-                      ? 'border-emerald-700 bg-emerald-50'
-                      : 'border-slate-200 bg-slate-50'
-                  }`}
-                >
-                  <Text
-                    className={`text-xs font-bold ${
+              {(['Pendente', 'Aprovado'] as const).map((statusOption) => {
+                const isLockedForSocio =
+                  statusOption === 'Aprovado' && !permissions.canApproveGuests;
+
+                return (
+                  <Pressable
+                    key={statusOption}
+                    accessibilityRole="button"
+                    onPress={() => {
+                      if (isLockedForSocio) {
+                        Alert.alert(
+                          'Aprovação Restrita à Diretoria',
+                          'Como Sócio Efetivo (Nível 2), seus convites são enviados com status "Pendente" e precisam ser aprovados pela Diretoria (Nível 1).'
+                        );
+                        return;
+                      }
+                      setInitialStatusChoice(statusOption);
+                    }}
+                    className={`flex-1 items-center rounded-md border py-2 ${
                       initialStatusChoice === statusOption
-                        ? 'text-emerald-900'
-                        : 'text-slate-600'
+                        ? 'border-emerald-700 bg-emerald-50'
+                        : 'border-slate-200 bg-slate-50'
                     }`}
                   >
-                    {statusOption}
-                  </Text>
-                </Pressable>
-              ))}
+                    <Text
+                      className={`text-xs font-bold ${
+                        initialStatusChoice === statusOption
+                          ? 'text-emerald-900'
+                          : 'text-slate-600'
+                      }`}
+                    >
+                      {isLockedForSocio
+                        ? '🔒 Aprovado (Diretoria)'
+                        : statusOption}
+                    </Text>
+                  </Pressable>
+                );
+              })}
             </View>
 
             <View style={styles.modalActions}>
@@ -521,7 +718,10 @@ export default function GuestsScreen() {
               </Text>
             ) : null}
 
-            <Text style={styles.inputLabel}>Avaliação da Diretoria</Text>
+            <Text style={styles.inputLabel}>
+              Avaliação da Diretoria{' '}
+              {!permissions.canApproveGuests ? '(🔒 Exclusivo Nível 1)' : ''}
+            </Text>
             <View className="flex-row gap-2">
               <Pressable
                 accessibilityRole="button"
@@ -533,7 +733,7 @@ export default function GuestsScreen() {
                 }`}
               >
                 <Text className="text-xs font-bold text-emerald-800">
-                  Aprovar
+                  {permissions.canApproveGuests ? 'Aprovar' : '🔒 Aprovar'}
                 </Text>
               </Pressable>
 
@@ -561,7 +761,7 @@ export default function GuestsScreen() {
                 }`}
               >
                 <Text className="text-xs font-bold text-red-700">
-                  Reprovar
+                  {permissions.canApproveGuests ? 'Reprovar' : '🔒 Reprovar'}
                 </Text>
               </Pressable>
             </View>

@@ -34,6 +34,7 @@ import {
   calculateGameAttendance,
   formatCurrencyBRL,
 } from '@/utils/calculations';
+import { getPlayerPermissions } from '@/utils/validations';
 
 const DETAIL_TABS = ['Resumo', 'Presença', 'Escalação', 'Resultado'] as const;
 type DetailTab = (typeof DETAIL_TABS)[number];
@@ -85,6 +86,7 @@ export default function GameDetailsScreen() {
 
   const games = useAppStore((state) => state.games);
   const guests = useAppStore((state) => state.guests);
+  const players = useAppStore((state) => state.players);
   const currentPlayer = useAppStore((state) => state.currentPlayer);
   const toggleGameConfirmation = useAppStore(
     (state) => state.toggleGameConfirmation
@@ -95,6 +97,7 @@ export default function GameDetailsScreen() {
   const updateGame = useAppStore((state) => state.updateGame);
   const updateGameScore = useAppStore((state) => state.updateGameScore);
 
+  const permissions = getPlayerPermissions(currentPlayer);
   const game = games.find((item) => item.id === id) ?? games[0];
   const isConfirmed = game.attendance.confirmedPlayers.includes(
     currentPlayer.name
@@ -214,6 +217,14 @@ export default function GameDetailsScreen() {
   };
 
   const handleOpenEditGameModal = () => {
+    if (!permissions.canManageGames) {
+      Alert.alert(
+        'Acesso Restrito à Diretoria (Nível 1)',
+        `Olá, ${currentPlayer.name}!\n\nSeu perfil atual é "${permissions.hierarchyLabel}".\n\nApenas membros da Diretoria Executiva (Nível 1) têm acesso para editar local, data, horário ou custo das partidas.`
+      );
+      return;
+    }
+
     resetEditGameForm({
       title: game.title,
       competition: game.competition,
@@ -255,6 +266,14 @@ export default function GameDetailsScreen() {
   };
 
   const handleOpenScoreModal = () => {
+    if (!permissions.canManageScores) {
+      Alert.alert(
+        'Acesso Restrito à Diretoria (Nível 1)',
+        `Olá, ${currentPlayer.name}!\n\nSeu perfil atual é "${permissions.hierarchyLabel}".\n\nApenas a Diretoria Executiva (Nível 1) tem permissão para lançar ou alterar o placar oficial e a súmula de artilheiros.`
+      );
+      return;
+    }
+
     resetScoreForm({
       homeScore: String(game.homeScore ?? 0),
       awayScore: String(game.awayScore ?? 0),
@@ -278,7 +297,10 @@ export default function GameDetailsScreen() {
     });
 
     if (!result.isValid || !result.sanitizedValue) {
-      Alert.alert('Erro ao salvar placar', 'Verifique os gols informados.');
+      Alert.alert(
+        'Erro ao salvar placar',
+        result.errorMessage ?? 'Verifique os gols informados.'
+      );
       return;
     }
 
@@ -316,7 +338,9 @@ export default function GameDetailsScreen() {
                   className="rounded-full border border-slate-300 bg-slate-100 px-2.5 py-1"
                 >
                   <Text className="text-[11px] font-bold text-slate-700">
-                    Editar jogo
+                    {permissions.canManageGames
+                      ? 'Editar jogo'
+                      : '🔒 Editar jogo'}
                   </Text>
                 </Pressable>
                 <View style={styles.nextBadge}>
@@ -493,14 +517,30 @@ export default function GameDetailsScreen() {
                 Jogadores confirmados ({game.attendance.confirmedPlayers.length}
                 )
               </Text>
-              {game.attendance.confirmedPlayers.map((player, index) => (
-                <View key={player} style={styles.lineupRow}>
-                  <Text style={styles.lineupNumber}>
-                    {String(index + 1).padStart(2, '0')}
-                  </Text>
-                  <Text style={styles.infoValue}>{player}</Text>
-                </View>
-              ))}
+              {game.attendance.confirmedPlayers.map((playerName, index) => {
+                const matchedPlayer = players.find(
+                  (p) => p.name === playerName
+                );
+                const badgeText = matchedPlayer
+                  ? `${matchedPlayer.position} • ${matchedPlayer.membershipStatus} (Nível ${matchedPlayer.hierarchyLevel})`
+                  : 'Atleta confirmado';
+
+                return (
+                  <View key={playerName} style={styles.lineupRow}>
+                    <Text style={styles.lineupNumber}>
+                      {String(index + 1).padStart(2, '0')}
+                    </Text>
+                    <View className="flex-1">
+                      <Text className="text-xs font-bold text-slate-900">
+                        {playerName}
+                      </Text>
+                      <Text className="text-[10px] text-slate-500">
+                        {badgeText}
+                      </Text>
+                    </View>
+                  </View>
+                );
+              })}
             </View>
           )}
 
@@ -509,7 +549,13 @@ export default function GameDetailsScreen() {
               <View className="flex-row items-center justify-between">
                 <Text style={styles.panelTitle}>Placar e Artilharia</Text>
                 <SecondaryButton
-                  title={hasScore ? 'Editar placar' : 'Lançar placar'}
+                  title={
+                    permissions.canManageScores
+                      ? hasScore
+                        ? 'Editar placar'
+                        : 'Lançar placar'
+                      : '🔒 Lançar placar (Diretoria)'
+                  }
                   onPress={handleOpenScoreModal}
                 />
               </View>
@@ -542,8 +588,10 @@ export default function GameDetailsScreen() {
                 </View>
               ) : (
                 <Text style={styles.resultPending}>
-                  Nenhum placar registrado ainda. Toque em &quot;Lançar
-                  placar&quot; para informar o resultado e os autores dos gols.
+                  Nenhum placar registrado ainda.{' '}
+                  {permissions.canManageScores
+                    ? 'Toque em "Lançar placar" para informar o resultado e os autores dos gols.'
+                    : 'Apenas a Diretoria (Nível 1) pode lançar o placar oficial.'}
                 </Text>
               )}
             </View>
@@ -594,7 +642,7 @@ export default function GameDetailsScreen() {
             />
             <InfoRow
               icon="check_circle"
-              label="Status"
+              label="Seu status na partida"
               value={
                 game.phase === 'finished'
                   ? 'Finalizado'
@@ -602,7 +650,7 @@ export default function GameDetailsScreen() {
                     ? 'Confirmado'
                     : isDeclined
                       ? 'Ausente'
-                      : game.status
+                      : 'Pendente'
               }
             />
           </View>
@@ -623,7 +671,7 @@ export default function GameDetailsScreen() {
           >
             <View className="w-full max-w-[440px] self-center rounded-xl bg-white p-5">
               <Text className="text-lg font-bold text-slate-900">
-                Editar Partida
+                Editar Partida (Diretoria Nível 1)
               </Text>
 
               <Text className="mb-1 mt-3 text-xs font-semibold text-slate-700">
@@ -1101,12 +1149,13 @@ const styles = StyleSheet.create({
     lineHeight: 19,
   },
   lineupRow: {
-    minHeight: 42,
+    minHeight: 46,
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.two,
     borderTopWidth: 1,
     borderTopColor: BrandColors.border,
+    paddingVertical: 4,
   },
   lineupNumber: {
     width: 28,

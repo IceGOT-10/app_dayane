@@ -26,6 +26,7 @@ import {
   calculateCostSharing,
   calculateGameAttendance,
 } from '@/utils/calculations';
+import { getPlayerPermissions } from '@/utils/validations';
 
 const FILTERS: { id: GamePhase; label: string }[] = [
   { id: 'available', label: 'Disponíveis' },
@@ -165,9 +166,10 @@ export default function GamesScreen() {
 
   const games = useAppStore((state) => state.games);
   const guests = useAppStore((state) => state.guests);
-  const currentPlayerName = useAppStore((state) => state.currentPlayer.name);
+  const currentPlayer = useAppStore((state) => state.currentPlayer);
   const createGame = useAppStore((state) => state.createGame);
 
+  const permissions = getPlayerPermissions(currentPlayer);
   const filteredGames = games.filter((game) => game.phase === activeFilter);
 
   const {
@@ -188,6 +190,17 @@ export default function GamesScreen() {
       courtCost: '300,00',
     },
   });
+
+  const handlePressCreateGame = () => {
+    if (!permissions.canManageGames) {
+      Alert.alert(
+        'Acesso Restrito à Diretoria (Nível 1)',
+        `Olá, ${currentPlayer.name}!\n\nSeu perfil atual é "${permissions.hierarchyLabel}".\n\nApenas membros da Diretoria Executiva (Nível 1) têm permissão para agendar e cadastrar novas partidas. Você pode tocar em qualquer partida abaixo para confirmar sua presença ou justificar ausência.`
+      );
+      return;
+    }
+    setCreateModalVisible(true);
+  };
 
   const onSubmitNewGame = (data: GameFormData) => {
     const result = createGame({
@@ -231,12 +244,12 @@ export default function GamesScreen() {
             )
             .reduce((acc, guest) => acc + (guest.guestFee ?? 0), 0);
           const isPlayerConfirmed =
-            item.attendance.confirmedPlayers.includes(currentPlayerName);
+            item.attendance.confirmedPlayers.includes(currentPlayer.name);
           const isPlayerDeclined = (
             item.declinedPlayers ??
             item.attendance.declinedPlayers ??
             []
-          ).includes(currentPlayerName);
+          ).includes(currentPlayer.name);
 
           return (
             <GameCard
@@ -253,12 +266,37 @@ export default function GamesScreen() {
           <View>
             <PlayerScreenHeader title="Jogos" />
             <View style={styles.headerActionsWrapper}>
+              <View className="mb-2.5 flex-row items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2">
+                <Text className="text-xs font-semibold text-slate-700">
+                  Perfil: {currentPlayer.name.split(' ')[0]} (
+                  {permissions.hierarchyLabel})
+                </Text>
+                <Text
+                  className={`text-[11px] font-bold ${
+                    permissions.canManageGames
+                      ? 'text-emerald-700'
+                      : 'text-amber-700'
+                  }`}
+                >
+                  {permissions.canManageGames
+                    ? 'Gestor de Jogos'
+                    : 'Atleta Convocado'}
+                </Text>
+              </View>
               <PrimaryButton
-                title="Cadastrar nova partida"
-                onPress={() => setCreateModalVisible(true)}
+                title={
+                  permissions.canManageGames
+                    ? 'Cadastrar nova partida'
+                    : '🔒 Cadastrar partida (Restrito à Diretoria)'
+                }
+                onPress={handlePressCreateGame}
                 leftIcon={
                   <SymbolView
-                    name={{ ios: 'plus', android: 'add', web: 'add' }}
+                    name={{
+                      ios: permissions.canManageGames ? 'plus' : 'lock.fill',
+                      android: permissions.canManageGames ? 'add' : 'lock',
+                      web: permissions.canManageGames ? 'add' : 'lock',
+                    }}
                     size={18}
                     tintColor="#FFFFFF"
                   />

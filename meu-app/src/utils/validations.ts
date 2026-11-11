@@ -1,13 +1,23 @@
 /**
  * @file validations.ts
- * @description Módulo de Validação Defensiva e Sanitização de Entradas do Gestão Bola (Requisito R6).
+ * @description Módulo de Validação Defensiva, Sanitização de Entradas e Controle de Acesso
+ * Baseado em Hierarquia (RBAC) do Gestão Bola (Requisito R6).
  *
  * OBJETIVO PEDAGÓGICO (Sabatina Profª Dayane):
- * Nenhum formulário móvel deve confiar cegamente no que o usuário digita no `TextInput`.
- * Este módulo centraliza as regras de validação usando Expressões Regulares (RegEx) e
- * retorna sempre um objeto padronizado (`ValidationResult`), permitindo exibir mensagens
- * claras de erro inline (como em `login.tsx`) ou em caixas de diálogo (`Alert.alert`).
+ * Nenhum formulário móvel deve confiar cegamente no que o usuário digita no `TextInput` ou
+ * no nível de permissão da interface. Este módulo centraliza as regras de validação usando
+ * Expressões Regulares (RegEx) e a matriz de hierarquia de perfis (`getPlayerPermissions`),
+ * retornando sempre objetos padronizados (`ValidationResult` e `PlayerPermissions`).
  */
+
+import type {
+  ClubDocument,
+  HierarchyLevel,
+  Player,
+  PlayerMembershipStatus,
+  PlayerPermissions,
+  PlayerRole,
+} from '@/types/ball-management';
 
 /**
  * Interface padronizada de resposta para todas as validações do aplicativo.
@@ -73,6 +83,119 @@ export const TIME_24H_REGEX = /^([01]\d|2[0-3]):([0-5]\d)$/;
  * Expressão Regular para telefone brasileiro com DDD (aceita com ou sem parênteses/hífen).
  */
 export const PHONE_BR_REGEX = /^\(?\d{2}\)?\s?\d{4,5}-?\d{4}$/;
+
+/**
+ * Deriva o nível numérico da hierarquia (1 a 4) a partir do papel (`role`) e associação (`membershipStatus`).
+ */
+export function deriveHierarchyLevel(
+  role: PlayerRole,
+  membershipStatus: PlayerMembershipStatus
+): HierarchyLevel {
+  if (role === 'Diretoria') {
+    return 1;
+  }
+  if (membershipStatus === 'Sócio') {
+    return 2;
+  }
+  if (membershipStatus === 'Mensalista') {
+    return 3;
+  }
+  return 4;
+}
+
+/**
+ * Calcula a matriz completa de permissões (RBAC) para um atleta com base em sua hierarquia:
+ * - Nível 1 (Diretoria): Acesso total (cria/edita jogos, placares, aprova/reprova convites, aplica multas, vê todos os documentos).
+ * - Nível 2 (Sócio Efetivo): Acessa convites e pode enviar 1 convite/mês (entra como Pendente), mas não aprova convites nem gerencia jogos/multas.
+ * - Nível 3 (Mensalista): Acessa a lista de convidados apenas para consulta; NÃO pode fazer convites nem gerenciar jogos/multas.
+ * - Nível 4 (Diarista): NÃO tem acesso à área de convidados e NÃO pode fazer convites; acesso apenas às partidas e regras públicas.
+ */
+export function getPlayerPermissions(
+  player: Pick<Player, 'role' | 'membershipStatus'> & {
+    hierarchyLevel?: HierarchyLevel;
+  }
+): PlayerPermissions {
+  const level =
+    player.hierarchyLevel ??
+    deriveHierarchyLevel(player.role, player.membershipStatus);
+
+  if (level === 1 || player.role === 'Diretoria') {
+    return {
+      hierarchyLevel: 1,
+      hierarchyLabel: 'Nível 1 • Diretoria Executiva',
+      hierarchyDescription:
+        'Acesso administrativo total: cadastra/edita partidas, lança placares, aprova/reprova convites, aplica multas e acessa atas restritas.',
+      canManageGames: true,
+      canManageScores: true,
+      canAccessGuests: true,
+      canInviteGuests: true,
+      canApproveGuests: true,
+      canApplyPenalties: true,
+      monthlyGuestQuota: 1,
+    };
+  }
+
+  if (level === 2 || player.membershipStatus === 'Sócio') {
+    return {
+      hierarchyLevel: 2,
+      hierarchyLabel: 'Nível 2 • Sócio Efetivo',
+      hierarchyDescription:
+        'Possui acesso à Gestão de Convidados e direito a 1 convite/mês (sujeito à aprovação da Diretoria). Não edita jogos nem aplica multas.',
+      canManageGames: false,
+      canManageScores: false,
+      canAccessGuests: true,
+      canInviteGuests: true,
+      canApproveGuests: false,
+      canApplyPenalties: false,
+      monthlyGuestQuota: 1,
+    };
+  }
+
+  if (level === 3 || player.membershipStatus === 'Mensalista') {
+    return {
+      hierarchyLevel: 3,
+      hierarchyLabel: 'Nível 3 • Atleta Mensalista',
+      hierarchyDescription:
+        'Vaga prioritária em jogos e consulta da lista de convidados, mas NÃO possui permissão para fazer convites nem gerenciar partidas.',
+      canManageGames: false,
+      canManageScores: false,
+      canAccessGuests: true,
+      canInviteGuests: false,
+      canApproveGuests: false,
+      canApplyPenalties: false,
+      monthlyGuestQuota: 0,
+    };
+  }
+
+  return {
+    hierarchyLevel: 4,
+    hierarchyLabel: 'Nível 4 • Atleta Diarista',
+    hierarchyDescription:
+      'Acesso básico às partidas e diárias. NÃO possui acesso à Gestão de Convidados, não pode fazer convites e não acessa documentos internos.',
+    canManageGames: false,
+    canManageScores: false,
+    canAccessGuests: false,
+    canInviteGuests: false,
+    canApproveGuests: false,
+    canApplyPenalties: false,
+    monthlyGuestQuota: 0,
+  };
+}
+
+/**
+ * Verifica se o perfil do atleta logado possui nível hierárquico suficiente para ler/baixar um documento.
+ * Como Nível 1 é o topo e Nível 4 é a base, o atleta tem acesso quando `playerLevel <= doc.minHierarchyLevel`.
+ */
+export function canPlayerAccessDocument(
+  player: Pick<Player, 'role' | 'membershipStatus'> & {
+    hierarchyLevel?: HierarchyLevel;
+  },
+  doc: Pick<ClubDocument, 'minHierarchyLevel'>
+): boolean {
+  const { hierarchyLevel } = getPlayerPermissions(player);
+  const requiredLevel = doc.minHierarchyLevel ?? 4;
+  return hierarchyLevel <= requiredLevel;
+}
 
 /**
  * 1. VALIDAÇÃO E SANITIZAÇÃO DO NOME DO CONVIDADO (`validateGuestName`)

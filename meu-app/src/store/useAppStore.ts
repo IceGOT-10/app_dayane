@@ -1,14 +1,14 @@
 /**
  * @file useAppStore.ts
  * @description Store global do Gestão Bola utilizando Zustand integrado ao banco de dados
- * local (`db.ts`), motores de cálculos matemáticos (`calculations.ts` - R5) e validações (`validations.ts` - R6).
+ * local (`db.ts`), motores de cálculos matemáticos (`calculations.ts` - R5), validações e
+ * controle de acesso por hierarquia de perfis (`validations.ts` - R6).
  *
  * OBJETIVO PEDAGÓGICO (Sabatina Profª Dayane):
  * O Zustand centraliza o estado compartilhado na memória RAM do aplicativo e sincroniza
  * automaticamente cada mutação com o banco de dados local (SQLite / AsyncStorage).
- * Assim, qualquer ação executada pelo atleta ou pela diretoria (confirmar presença,
- * justificar ausência, criar jogo, lançar placar, gerir convidados, pagar mensalidade
- * ou aplicar multa) reflete instantaneamente em todas as telas e persiste entre sessões.
+ * Além disso, todas as ações administrativas e de convites verificam a matriz de hierarquia
+ * (`getPlayerPermissions`), impedindo que perfis sem permissão executem ações restritas.
  */
 
 import { create } from 'zustand';
@@ -16,6 +16,7 @@ import { create } from 'zustand';
 import {
   loadDatabaseSnapshot,
   saveActiveSessionPlayerId,
+  saveDocumentsToDb,
   saveFinancialMetricsToDb,
   saveGamesToDb,
   saveGuestsToDb,
@@ -52,6 +53,8 @@ import {
   type GameAttendanceResult,
 } from '@/utils/calculations';
 import {
+  deriveHierarchyLevel,
+  getPlayerPermissions,
   validateGuestName,
   validateGuestQuota,
   validateLoginCredentials,
@@ -90,6 +93,7 @@ interface AppState {
   transactions: FinancialTransaction[];
   documents: ClubDocument[];
   hydrateStore: () => Promise<void>;
+  resetDatabaseToSeed: () => Promise<void>;
   authenticatePlayer: (
     email: string,
     password?: string
@@ -164,7 +168,7 @@ interface AppState {
     guestId: string,
     status: GuestStatus
   ) => ValidationResult<Guest | null>;
-  deleteGuest: (guestId: string) => void;
+  deleteGuest: (guestId: string) => ValidationResult<Guest | null>;
   registerPayment: (
     rawAmount: string | number,
     method?: PaymentMethod,
@@ -174,6 +178,7 @@ interface AppState {
     kind: PenaltyKind;
     rawAmount: string | number;
     description?: string;
+    targetPlayerId?: string;
   }) => ValidationResult<FinancialSummaryResult | null>;
 }
 
@@ -217,6 +222,37 @@ export const useAppStore = create<AppState>((set, get) => ({
     } catch {
       set({ isHydrated: true });
     }
+  },
+
+  resetDatabaseToSeed: async () => {
+    const state = get();
+    const activePlayer =
+      SEED_PLAYERS.find((p) => p.id === state.currentPlayer.id) ??
+      SEED_PLAYERS[0];
+    const activeMetric =
+      SEED_FINANCIAL_METRICS.find((m) => m.playerId === activePlayer.id) ??
+      SEED_FINANCIAL_METRICS[0];
+
+    await Promise.all([
+      savePlayersToDb(SEED_PLAYERS),
+      saveGamesToDb(SEED_GAMES),
+      saveGuestsToDb(SEED_GUESTS),
+      saveFinancialMetricsToDb(SEED_FINANCIAL_METRICS),
+      saveTransactionsToDb(SEED_TRANSACTIONS),
+      saveDocumentsToDb(SEED_DOCUMENTS),
+      saveActiveSessionPlayerId(activePlayer.id),
+    ]);
+
+    set({
+      players: SEED_PLAYERS,
+      currentPlayer: activePlayer,
+      games: SEED_GAMES,
+      guests: SEED_GUESTS,
+      financialMetrics: SEED_FINANCIAL_METRICS,
+      financialMetric: activeMetric,
+      transactions: SEED_TRANSACTIONS,
+      documents: SEED_DOCUMENTS,
+    });
   },
 
   authenticatePlayer: (email, password) => {
@@ -266,7 +302,12 @@ export const useAppStore = create<AppState>((set, get) => ({
         id: `fin-${matchedPlayer.id}`,
         playerId: matchedPlayer.id,
         referenceMonth: '09/2026',
-        monthlyFee: matchedPlayer.membershipStatus === 'Diarista' ? 40 : 60,
+        monthlyFee:
+          matchedPlayer.membershipStatus === 'Diarista'
+            ? 40
+            : matchedPlayer.membershipStatus === 'Mensalista'
+              ? 65
+              : 60,
         penaltiesCount: 0,
         penaltiesAmount: 0,
         paymentsMade: 0,
@@ -366,6 +407,21 @@ export const useAppStore = create<AppState>((set, get) => ({
       };
     }
 
+    const hierarchyLevel = deriveHierarchyLevel('Atleta', input.membershipStatus);
+    const hierarchyTitle =
+      input.membershipStatus === 'Sócio'
+        ? 'Sócio Efetivo (Nível 2)'
+        : input.membershipStatus === 'Mensalista'
+          ? 'Atleta Mensalista (Nível 3)'
+          : 'Atleta Diarista (Nível 4)';
+
+    const profileBio =
+      input.membershipStatus === 'Sócio'
+        ? 'Sócio efetivo recém-cadastrado com direito a 1 convite por mês (mediante aprovação da Diretoria).'
+        : input.membershipStatus === 'Mensalista'
+          ? 'Atleta mensalista recém-cadastrado com vaga prioritária nas peladas e acesso de consulta aos convidados.'
+          : 'Atleta diarista recém-cadastrado. Participa conforme disponibilidade de vagas e não possui acesso ao módulo de convidados.';
+
     const newPlayer: Player = {
       id: `player-${Date.now()}`,
       name: nameCheck.sanitizedValue,
@@ -377,32 +433,58 @@ export const useAppStore = create<AppState>((set, get) => ({
       shirtNumber: input.shirtNumber,
       membershipStatus: input.membershipStatus,
       role: 'Atleta',
+      hierarchyLevel,
+      hierarchyTitle,
+      preferredFoot: 'Destro',
+      goalsScored: 0,
+      gamesPlayed: 0,
+      profileBio,
       isActive: true,
     };
+
+    const baseFee =
+      newPlayer.membershipStatus === 'Diarista'
+        ? 40
+        : newPlayer.membershipStatus === 'Mensalista'
+          ? 65
+          : 60;
 
     const newMetric: FinancialMetric = {
       id: `fin-${newPlayer.id}`,
       playerId: newPlayer.id,
       referenceMonth: '09/2026',
-      monthlyFee: newPlayer.membershipStatus === 'Diarista' ? 40 : 60,
+      monthlyFee: baseFee,
       penaltiesCount: 0,
       penaltiesAmount: 0,
       paymentsMade: 0,
       status: 'Em aberto',
     };
 
+    const initialTx: FinancialTransaction = {
+      id: `tx-init-${Date.now()}`,
+      playerId: newPlayer.id,
+      type: 'payment',
+      description: `Abertura de cadastro (${newPlayer.membershipStatus} — Nível ${hierarchyLevel})`,
+      amount: 0,
+      method: 'PIX',
+      createdAt: formatNowBr(),
+    };
+
     const updatedPlayers = [...state.players, newPlayer];
     const updatedMetrics = [...state.financialMetrics, newMetric];
+    const updatedTransactions = [initialTx, ...state.transactions];
 
     set({
       players: updatedPlayers,
       currentPlayer: newPlayer,
       financialMetrics: updatedMetrics,
       financialMetric: newMetric,
+      transactions: updatedTransactions,
     });
 
     void savePlayersToDb(updatedPlayers);
     void saveFinancialMetricsToDb(updatedMetrics);
+    void saveTransactionsToDb(updatedTransactions);
     void saveActiveSessionPlayerId(newPlayer.id);
 
     return {
@@ -705,6 +787,17 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   createGame: (input) => {
+    const state = get();
+    const permissions = getPlayerPermissions(state.currentPlayer);
+
+    if (!permissions.canManageGames) {
+      return {
+        isValid: false,
+        errorMessage: `Acesso negado por hierarquia: seu perfil atual (${permissions.hierarchyLabel}) não possui permissão para cadastrar novas partidas. Apenas a Diretoria Executiva (Nível 1) pode agendar jogos.`,
+        sanitizedValue: null,
+      };
+    }
+
     const costValidation = validateMonetaryInput(input.courtCost);
     if (!costValidation.isValid) {
       return {
@@ -714,10 +807,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       };
     }
 
-    const state = get();
-
-    // Convidados são vinculados à partida pelo TÍTULO; dois jogos com o mesmo título
-    // misturariam convidados, quórum de convites e rateio. Por isso o título deve ser único.
     const titleAlreadyUsed = state.games.some(
       (g) => g.title.trim().toLowerCase() === input.title.trim().toLowerCase()
     );
@@ -766,6 +855,17 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   updateGame: (gameId, input) => {
+    const state = get();
+    const permissions = getPlayerPermissions(state.currentPlayer);
+
+    if (!permissions.canManageGames) {
+      return {
+        isValid: false,
+        errorMessage: `Acesso negado por hierarquia: seu perfil (${permissions.hierarchyLabel}) não possui permissão para editar dados das partidas. Apenas a Diretoria (Nível 1) pode alterar jogos.`,
+        sanitizedValue: null,
+      };
+    }
+
     const costValidation = validateMonetaryInput(input.courtCost);
     if (!costValidation.isValid) {
       return {
@@ -775,7 +875,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       };
     }
 
-    const state = get();
     const existing = state.games.find((g) => g.id === gameId);
     if (!existing) {
       return {
@@ -815,8 +914,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       g.id === gameId ? updatedGame : g
     );
 
-    // Os convidados guardam o título e a data da partida; se qualquer um mudou,
-    // sincronizamos para que a cota mensal (1 convidado/mês) use a data correta.
     const gameIdentityChanged =
       existing.title !== updatedGame.title || existing.date !== updatedGame.date;
 
@@ -843,6 +940,16 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   updateGameScore: (gameId, input) => {
     const state = get();
+    const permissions = getPlayerPermissions(state.currentPlayer);
+
+    if (!permissions.canManageScores) {
+      return {
+        isValid: false,
+        errorMessage: `Acesso negado por hierarquia: seu perfil (${permissions.hierarchyLabel}) não pode lançar nem editar placares oficiais. Solicite à Diretoria Executiva (Nível 1).`,
+        sanitizedValue: null,
+      };
+    }
+
     const existing = state.games.find((g) => g.id === gameId);
     if (!existing) {
       return {
@@ -852,8 +959,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       };
     }
 
-    // Marcar "Finalizada" encerra a partida; desmarcar numa partida já finalizada a reabre
-    // (antes, desmarcar a caixa era ignorado em silêncio e a partida seguia "Finalizado").
     const nextPhase: Game['phase'] = input.markFinished
       ? 'finished'
       : existing.phase === 'finished'
@@ -890,6 +995,24 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   addGuest: (input) => {
     const state = get();
+    const permissions = getPlayerPermissions(state.currentPlayer);
+
+    if (!permissions.canAccessGuests) {
+      return {
+        isValid: false,
+        errorMessage: `Acesso bloqueado: seu perfil (${permissions.hierarchyLabel}) não tem acesso ao módulo de convidados nem permissão para enviar convites.`,
+        sanitizedValue: null,
+      };
+    }
+
+    if (!permissions.canInviteGuests) {
+      return {
+        isValid: false,
+        errorMessage: `Permissão negada: seu perfil (${permissions.hierarchyLabel}) possui apenas acesso de leitura aos convidados e não tem direito a fazer convites. Somente Sócios (Nível 2) e Diretoria (Nível 1) podem convidar.`,
+        sanitizedValue: null,
+      };
+    }
+
     const nameValidation = validateGuestName(input.name);
     if (!nameValidation.isValid) {
       return {
@@ -934,9 +1057,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       };
     }
 
-    const initialStatus: GuestStatus =
-      input.initialStatus ??
-      (state.currentPlayer.role === 'Diretoria' ? 'Aprovado' : 'Pendente');
+    // Somente a Diretoria (Nível 1) pode criar convites já aprovados; Sócios (Nível 2) entram sempre como 'Pendente'.
+    const initialStatus: GuestStatus = permissions.canApproveGuests
+      ? (input.initialStatus ?? 'Aprovado')
+      : 'Pendente';
 
     const newGuest: Guest = {
       id: `guest-${Date.now()}`,
@@ -962,6 +1086,16 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   updateGuest: (guestId, input) => {
     const state = get();
+    const permissions = getPlayerPermissions(state.currentPlayer);
+
+    if (!permissions.canAccessGuests || !permissions.canInviteGuests) {
+      return {
+        isValid: false,
+        errorMessage: `Acesso negado: seu perfil (${permissions.hierarchyLabel}) não possui permissão para editar convites.`,
+        sanitizedValue: null,
+      };
+    }
+
     const existing = state.guests.find((g) => g.id === guestId);
     if (!existing) {
       return {
@@ -969,6 +1103,24 @@ export const useAppStore = create<AppState>((set, get) => ({
         errorMessage: 'Convite não encontrado.',
         sanitizedValue: null,
       };
+    }
+
+    if (!permissions.canApproveGuests) {
+      if (existing.invitedByPlayerId !== state.currentPlayer.id) {
+        return {
+          isValid: false,
+          errorMessage:
+            'Acesso restrito: como Sócio (Nível 2), você só pode editar convites indicados por você mesmo.',
+          sanitizedValue: null,
+        };
+      }
+      if (existing.status !== 'Pendente') {
+        return {
+          isValid: false,
+          errorMessage: `Este convite já foi avaliado pela Diretoria (${existing.status}) e não pode mais ser alterado por um atleta.`,
+          sanitizedValue: null,
+        };
+      }
     }
 
     const nameValidation = validateGuestName(input.name);
@@ -985,7 +1137,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     );
     const gameTitle = targetGame ? targetGame.title : input.game.trim();
     const targetDate = targetGame?.date ?? existing.date;
-    const nextStatus = input.status ?? existing.status;
+    const nextStatus = permissions.canApproveGuests
+      ? (input.status ?? existing.status)
+      : existing.status;
 
     if (nextStatus === 'Aprovado') {
       const approvedInGame = state.guests.filter(
@@ -1031,6 +1185,16 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setGuestStatus: (guestId, status) => {
     const state = get();
+    const permissions = getPlayerPermissions(state.currentPlayer);
+
+    if (!permissions.canApproveGuests) {
+      return {
+        isValid: false,
+        errorMessage: `Acesso restrito à Diretoria (Nível 1): seu perfil atual (${permissions.hierarchyLabel}) não possui permissão para aprovar ou reprovar convites.`,
+        sanitizedValue: null,
+      };
+    }
+
     const existing = state.guests.find((g) => g.id === guestId);
     if (!existing) {
       return {
@@ -1082,9 +1246,40 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   deleteGuest: (guestId) => {
     const state = get();
+    const permissions = getPlayerPermissions(state.currentPlayer);
+    const existing = state.guests.find((g) => g.id === guestId);
+
+    if (!existing) {
+      return {
+        isValid: false,
+        errorMessage: 'Convite não encontrado.',
+        sanitizedValue: null,
+      };
+    }
+
+    const isOwnPendingInvite =
+      permissions.canInviteGuests &&
+      existing.invitedByPlayerId === state.currentPlayer.id &&
+      existing.status === 'Pendente';
+
+    if (!permissions.canApproveGuests && !isOwnPendingInvite) {
+      return {
+        isValid: false,
+        errorMessage:
+          'Permissão negada: apenas a Diretoria (Nível 1) pode excluir qualquer convite. Sócios (Nível 2) só podem cancelar os próprios convites enquanto ainda estiverem Pendentes.',
+        sanitizedValue: null,
+      };
+    }
+
     const updatedGuests = state.guests.filter((g) => g.id !== guestId);
     set({ guests: updatedGuests });
     void saveGuestsToDb(updatedGuests);
+
+    return {
+      isValid: true,
+      errorMessage: null,
+      sanitizedValue: existing,
+    };
   },
 
   registerPayment: (rawAmount, method = 'PIX', description) => {
@@ -1149,6 +1344,17 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   addPenalty: (input) => {
+    const state = get();
+    const permissions = getPlayerPermissions(state.currentPlayer);
+
+    if (!permissions.canApplyPenalties) {
+      return {
+        isValid: false,
+        errorMessage: `Acesso restrito à Diretoria (Nível 1): seu perfil (${permissions.hierarchyLabel}) não possui permissão para aplicar penalidades ou cartões disciplinares.`,
+        sanitizedValue: null,
+      };
+    }
+
     const monetaryValidation = validateMonetaryInput(input.rawAmount);
     if (!monetaryValidation.isValid) {
       return {
@@ -1158,33 +1364,36 @@ export const useAppStore = create<AppState>((set, get) => ({
       };
     }
 
-    const state = get();
-    const currentMetric = state.financialMetric;
-    const updatedPenaltiesCount = currentMetric.penaltiesCount + 1;
+    const targetPlayerId = input.targetPlayerId ?? state.currentPlayer.id;
+    const targetMetric =
+      state.financialMetrics.find((m) => m.playerId === targetPlayerId) ??
+      state.financialMetric;
+
+    const updatedPenaltiesCount = targetMetric.penaltiesCount + 1;
     const updatedPenaltiesAmount = roundCurrency(
-      currentMetric.penaltiesAmount + monetaryValidation.sanitizedValue
+      targetMetric.penaltiesAmount + monetaryValidation.sanitizedValue
     );
 
     const summary = calculateFinancialSummary({
-      monthlyFee: currentMetric.monthlyFee,
+      monthlyFee: targetMetric.monthlyFee,
       penaltiesAmount: updatedPenaltiesAmount,
-      paymentsMade: currentMetric.paymentsMade,
+      paymentsMade: targetMetric.paymentsMade,
     });
 
     const updatedMetric: FinancialMetric = {
-      ...currentMetric,
+      ...targetMetric,
       penaltiesCount: updatedPenaltiesCount,
       penaltiesAmount: updatedPenaltiesAmount,
       status: summary.derivedStatus,
     };
 
     const updatedMetrics = state.financialMetrics.map((m) =>
-      m.playerId === state.currentPlayer.id ? updatedMetric : m
+      m.playerId === targetPlayerId ? updatedMetric : m
     );
 
     const newTx: FinancialTransaction = {
       id: `tx-${Date.now()}`,
-      playerId: state.currentPlayer.id,
+      playerId: targetPlayerId,
       type: 'penalty',
       description:
         input.description?.trim() || `Multa disciplinar: ${input.kind}`,
@@ -1196,7 +1405,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     const updatedTransactions = [newTx, ...state.transactions];
 
     set({
-      financialMetric: updatedMetric,
+      financialMetric:
+        targetPlayerId === state.currentPlayer.id
+          ? updatedMetric
+          : state.financialMetric,
       financialMetrics: updatedMetrics,
       transactions: updatedTransactions,
     });

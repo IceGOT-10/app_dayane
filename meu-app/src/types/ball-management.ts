@@ -1,7 +1,8 @@
 /**
  * @file ball-management.ts
  * @description Contratos de tipagem estrita (TypeScript) que unificam as entidades de domínio
- * do aplicativo Gestão Bola (Atletas, Partidas, Convidados, Presença, Finanças, Transações e Documentos).
+ * do aplicativo Gestão Bola (Atletas, Hierarquia de Permissões, Partidas, Convidados, Presença,
+ * Finanças, Transações e Documentos).
  *
  * OBJETIVO PEDAGÓGICO (Sabatina Profª Dayane):
  * Em TypeScript estrito ("strict": true no tsconfig.json), evitamos o uso de `any` criando
@@ -36,6 +37,46 @@ export type PlayerMembershipStatus = 'Sócio' | 'Mensalista' | 'Diarista';
 export type PlayerRole = 'Diretoria' | 'Atleta';
 
 /**
+ * Nível numérico na hierarquia de acesso do clube:
+ * - 1: Diretoria Executiva (Sócio Diretor — Acesso administrativo total)
+ * - 2: Sócio Efetivo (Atleta Sócio — Acessa convites e pode indicar até 1 convidado/mês)
+ * - 3: Atleta Mensalista (Consulta convidados, mas não pode enviar convites)
+ * - 4: Atleta Diarista (Acesso restrito: sem acesso à gestão de convidados e documentos internos)
+ */
+export type HierarchyLevel = 1 | 2 | 3 | 4;
+
+/**
+ * Pé dominante do atleta para ficha técnica individual.
+ */
+export type PreferredFoot = 'Destro' | 'Canhoto' | 'Ambidestro';
+
+/**
+ * Interface que descreve as permissões derivadas do nível hierárquico de cada perfil (RBAC).
+ */
+export interface PlayerPermissions {
+  /** Nível numérico na hierarquia (1 = Diretoria, 2 = Sócio, 3 = Mensalista, 4 = Diarista) */
+  hierarchyLevel: HierarchyLevel;
+  /** Rótulo de exibição do nível hierárquico */
+  hierarchyLabel: string;
+  /** Explicação didática do que o perfil pode ou não fazer no sistema */
+  hierarchyDescription: string;
+  /** Permite cadastrar novas partidas e editar dados de jogos existentes */
+  canManageGames: boolean;
+  /** Permite lançar/editar placares, artilharia e encerrar/reabrir partidas */
+  canManageScores: boolean;
+  /** Permite abrir e visualizar a tela de Gestão de Convidados */
+  canAccessGuests: boolean;
+  /** Permite cadastrar novos convites de atletas externos */
+  canInviteGuests: boolean;
+  /** Permite aprovar, reprovar ou excluir convites de qualquer sócio */
+  canApproveGuests: boolean;
+  /** Permite aplicar penalidades/multas disciplinares aos atletas */
+  canApplyPenalties: boolean;
+  /** Quantidade máxima de convites permitidos por mês para este perfil */
+  monthlyGuestQuota: number;
+}
+
+/**
  * Union Type para a situação cadastral/financeira de um lançamento (`profile.tsx` e `dashboard.tsx`).
  */
 export type FinancialStatus = 'Regular' | 'Em aberto' | 'Atrasado';
@@ -61,7 +102,7 @@ export type PenaltyKind =
 
 /**
  * Interface que representa um Atleta (Jogador) cadastrado no Gestão Bola.
- * Unifica os dados exibidos em `login.tsx`, `dashboard.tsx` e `profile.tsx`.
+ * Unifica os dados exibidos em `login.tsx`, `dashboard.tsx`, `more.tsx` e `profile.tsx`.
  */
 export interface Player {
   /** Identificador único do atleta (ex: 'player-01') */
@@ -80,10 +121,22 @@ export interface Player {
   position: string;
   /** Número fixo do colete ou camisa (ex: 9) */
   shirtNumber: number;
-  /** Modalidade de associação no grupo (define regras de mensalidade vs. diária) */
+  /** Modalidade de associação no grupo (define regras de mensalidade vs. diária e convites) */
   membershipStatus: PlayerMembershipStatus;
-  /** Papel organizacional (permite aprovar convites, lançar placares e aplicar multas) */
+  /** Papel organizacional ('Diretoria' ou 'Atleta') */
   role: PlayerRole;
+  /** Nível numérico na hierarquia de permissões (1 = Diretoria, 2 = Sócio, 3 = Mensalista, 4 = Diarista) */
+  hierarchyLevel: HierarchyLevel;
+  /** Título descritivo do cargo/nível do perfil no clube */
+  hierarchyTitle: string;
+  /** Pé dominante do jogador na ficha técnica */
+  preferredFoot: PreferredFoot;
+  /** Total de gols marcados pelo atleta na temporada */
+  goalsScored: number;
+  /** Total de partidas disputadas pelo atleta no histórico do clube */
+  gamesPlayed: number;
+  /** Resumo individual das atribuições e situação do atleta no grupo */
+  profileBio: string;
   /** Indica se o atleta está ativo para ser escalado nas partidas */
   isActive: boolean;
 }
@@ -149,7 +202,8 @@ export interface Game {
 
 /**
  * Interface que representa um Convidado externo (`guests/index.tsx`).
- * Regra de negócio: cada sócio pode levar até 1 convidado/mês, respeitando máx. 2 convidados por jogo.
+ * Regra de negócio: apenas Sócios (Nível 2) e Diretoria (Nível 1) podem levar até 1 convidado/mês,
+ * respeitando máx. 2 convidados aprovados por jogo.
  */
 export interface Guest {
   /** Identificador único do convite (ex: 'guest-1725830000') */
@@ -181,7 +235,7 @@ export interface FinancialMetric {
   playerId: string;
   /** Mês/Ano de competência (ex: '09/2026') */
   referenceMonth: string;
-  /** Valor base da mensalidade do grupo em Reais (R$) */
+  /** Valor base da mensalidade ou pacote de diárias do grupo em Reais (R$) */
   monthlyFee: number;
   /** Quantidade de infrações/penalidades acumuladas no mês (cartões, faltas sem aviso) */
   penaltiesCount: number;
@@ -216,6 +270,7 @@ export interface FinancialTransaction {
 
 /**
  * Interface que representa um Documento Oficial do grupo (`documents.tsx`).
+ * Inclui controle de acesso por nível hierárquico (`minHierarchyLevel`).
  */
 export interface ClubDocument {
   /** Identificador único do documento (ex: 'statute') */
@@ -228,6 +283,10 @@ export interface ClubDocument {
   size: string;
   /** Data da última revisão/aprovação em assembleia */
   updatedAt: string;
+  /** Nível máximo numérico que pode acessar (1 = Só Diretoria, 2 = Até Sócio, 3 = Até Mensalista, 4 = Todos) */
+  minHierarchyLevel: HierarchyLevel;
+  /** Rótulo visual indicando quem possui acesso ao documento */
+  accessLabel: string;
   /** Texto integral do documento para leitura em tela e exportação em PDF */
   content: string;
 }

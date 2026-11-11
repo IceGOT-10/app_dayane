@@ -107,6 +107,17 @@ Este diário registra as mudanças realizadas no projeto para facilitar a elabor
   - **Data dos convidados desatualizada** (`updateGame`): ao mudar só a data da partida, os convidados mantinham a data antiga e a cota mensal era calculada errada. Agora sincroniza quando título **ou** data mudam.
   - **Reabrir partida finalizada** (`updateGameScore`): desmarcar "Encerrar partida" numa partida finalizada era ignorado; agora ela volta para "Em andamento".
   - **Identidade visual (R7)**: `name` em `app.json` alterado de `meu-app` para `Gestão Bola`.
+- **Sistema de Hierarquia de Perfis em 4 Níveis (RBAC) e Banco de Dados Individualizado (`_v2` - 11/11/2026)**:
+  - **Modelagem de Hierarquia (`src/types/ball-management.ts` e `src/utils/validations.ts`)**: Criação do tipo `HierarchyLevel = 1 | 2 | 3 | 4`, da interface `PlayerPermissions` e das funções puras `deriveHierarchyLevel`, `getPlayerPermissions` e `canPlayerAccessDocument`.
+  - **4 Níveis de Acesso Distintos**:
+    - **Nível 1 (`Diretoria • Sócio`)**: Acesso administrativo total — cria/edita partidas, lança placares e artilharia, aprova/reprova/edita/exclui qualquer convidado, aplica multas disciplinares em qualquer atleta e acessa todos os 5 documentos (incluindo a *Ata de Auditoria Financeira*).
+    - **Nível 2 (`Atleta • Sócio`)**: Acessa a tela de convidados, pode cadastrar até **1 convidado por mês** (que entra obrigatoriamente como `Pendente` para aprovação da Diretoria), edita/cancela apenas os próprios convites pendentes e lê documentos até Nível 2 (*Estatuto Social*). Bloqueado para aprovar convites, criar/editar jogos ou aplicar multas.
+    - **Nível 3 (`Atleta • Mensalista`)**: Acessa a lista de convidados em **modo somente leitura** (bloqueado de enviar convites com alerta explicativo), lê documentos até Nível 3 (*Ficha de Associação*) e gerencia apenas sua própria presença e pagamentos.
+    - **Nível 4 (`Atleta • Diarista`)**: **Não possui acesso à tela de convidados** (exibe alerta de bloqueio e tela dedicada de *"Você não tem acesso a Convidados"*), não pode enviar convites e acessa apenas documentos públicos de Nível 4 (*Regimento Interno* e *Política de Privacidade*).
+  - **Banco de Dados e Seed Individualizado por Perfil (`src/database/seed.ts`, `db.ts` e `db.web.ts`)**:
+    - Migração automática do schema para `gestao_bola_v2.db` / chaves `_v2`, adicionando `hierarchyLevel`, `hierarchyTitle`, `preferredFoot`, `goalsScored`, `gamesPlayed` e `profileBio` em `players`, além de `minHierarchyLevel` e `accessLabel` em `documents`.
+    - Dados exclusivos para cada um dos 5 perfis (estatísticas individuais, histórico de presenças e ausências justificadas em 6 partidas, 6 convidados vinculados exclusivamente a Sócios/Diretoria, 15 transações financeiras com saldos `Regular`, `Em aberto`, `Atrasado` e `Crédito`, e 5 documentos classificados por sigilo).
+    - Adição da ação `resetDatabaseToSeed` na tela `Mais` para restauração imediata do banco original durante testes e apresentação.
 
 ---
 
@@ -198,12 +209,12 @@ app_dayane/
      ```
 
 ### Contas de Teste (Banco Local Inicial)
-Na primeira execução, o banco é populado automaticamente (`src/database/seed.ts`). Na tela de login há botões de preenchimento rápido, mas você também pode digitar manualmente:
-- **Diretoria / Sócio:** `leonardooocio@hotmail.com` (senha: `123456`)
-- **Diretoria / Sócio:** `rafael@gestaobola.com` (senha: `123456`)
-- **Atleta / Sócio:** `luan@gestaobola.com` (senha: `123456`)
-- **Atleta / Mensalista:** `kleytinn@gestaobola.com` (senha: `123456`)
-- **Atleta / Diarista:** `gabriel@gestaobola.com` (senha: `123456`)
+Na primeira execução, o banco é populado automaticamente (`src/database/seed.ts`). Na tela de login há botões de preenchimento rápido com o nível hierárquico de cada atleta:
+- **Nível 1 — Diretoria / Sócio (Presidente):** `leonardooocio@hotmail.com` (senha: `123456`) — Controle total (jogos, placares, aprovação de convites, multas e 5/5 documentos; saldo `Em aberto`).
+- **Nível 1 — Diretoria / Sócio (Tesoureiro):** `rafael@gestaobola.com` (senha: `123456`) — Controle total e saldo `Regular` com crédito acumulado de R$ 15,00.
+- **Nível 2 — Atleta / Sócio Efetivo:** `luan@gestaobola.com` (senha: `123456`) — Pode enviar 1 convite/mês (como `Pendente`), editar/cancelar os próprios convites pendentes e ler 4/5 documentos; bloqueado para aprovar convites, gerir jogos ou aplicar multas.
+- **Nível 3 — Atleta / Mensalista:** `kleytinn@gestaobola.com` (senha: `123456`) — Visualiza convidados apenas em modo leitura (não pode convidar), lê 3/5 documentos e possui status financeiro `Atrasado` (R$ 65,00 pendentes).
+- **Nível 4 — Atleta / Diarista Avulso:** `gabriel@gestaobola.com` (senha: `123456`) — Sem acesso à tela de convidados (bloqueio total com tela informativa), lê apenas 2/5 documentos públicos e paga diária avulsa por jogo.
 
 ### Comandos de Verificação de Qualidade
 Antes de apresentar ou enviar alterações para o GitHub, valide o código dentro de `meu-app/`:

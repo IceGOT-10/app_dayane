@@ -20,6 +20,10 @@ import { PlayerScreenHeader } from '@/components/player-screen-header';
 import { BrandColors, Fonts, Spacing } from '@/constants/theme';
 import { useAppStore } from '@/store/useAppStore';
 import type { ClubDocument } from '@/types/ball-management';
+import {
+  canPlayerAccessDocument,
+  getPlayerPermissions,
+} from '@/utils/validations';
 
 /**
  * Escapa caracteres especiais de HTML (`& < > " '`) antes de inserir texto no PDF.
@@ -101,11 +105,29 @@ function buildDocumentHtml(doc: ClubDocument): string {
 }
 
 export default function DocumentsScreen() {
+  const currentPlayer = useAppStore((state) => state.currentPlayer);
   const documents = useAppStore((state) => state.documents);
   const [selectedDoc, setSelectedDoc] = useState<ClubDocument | null>(null);
   const [isExportingId, setIsExportingId] = useState<string | null>(null);
 
+  const permissions = getPlayerPermissions(currentPlayer);
+  const accessibleDocsCount = documents.filter((doc) =>
+    canPlayerAccessDocument(currentPlayer, doc)
+  ).length;
+
+  const handleRestrictedDocumentAlert = (doc: ClubDocument) => {
+    Alert.alert(
+      'Acesso Negado — Hierarquia',
+      `Seu perfil (${currentPlayer.name} — Nível ${currentPlayer.hierarchyLevel}: ${currentPlayer.hierarchyTitle}) não possui permissão para acessar "${doc.title}".\n\nClassificação do documento: ${doc.accessLabel} (requer Nível ${doc.minHierarchyLevel} ou superior).`
+    );
+  };
+
   const handleExportPdf = async (doc: ClubDocument) => {
+    if (!canPlayerAccessDocument(currentPlayer, doc)) {
+      handleRestrictedDocumentAlert(doc);
+      return;
+    }
+
     try {
       setIsExportingId(doc.id);
       const html = buildDocumentHtml(doc);
@@ -153,61 +175,146 @@ export default function DocumentsScreen() {
             <View style={styles.intro}>
               <Text style={styles.title}>Documentos Oficiais</Text>
               <Text style={styles.description}>
-                Toque em qualquer documento para ler o texto integral ou no
-                ícone de PDF para gerar e compartilhar o arquivo.
+                Toque nos documentos liberados para ler o texto integral ou gerar
+                PDF. Documentos com cadeado exigem nível hierárquico superior.
               </Text>
+              <View className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+                <View className="flex-row flex-wrap items-center justify-between gap-2">
+                  <Text className="text-xs font-bold text-emerald-900">
+                    Seu acesso: {permissions.hierarchyLabel}
+                  </Text>
+                  <View className="rounded-full bg-emerald-200/80 px-2.5 py-0.5">
+                    <Text className="text-[11px] font-bold text-emerald-950">
+                      {accessibleDocsCount}/{documents.length} liberados
+                    </Text>
+                  </View>
+                </View>
+                <Text className="mt-1 text-[11px] text-emerald-800">
+                  Você pode acessar documentos de Nível{' '}
+                  {currentPlayer.hierarchyLevel} até Nível 4 (Público).
+                </Text>
+              </View>
             </View>
           </View>
         }
-        renderItem={({ item }) => (
-          <View style={styles.documentCard}>
-            <Pressable
-              accessibilityLabel={`Ler documento ${item.title}`}
-              accessibilityRole="button"
-              onPress={() => setSelectedDoc(item)}
-              style={styles.documentReadArea}
+        renderItem={({ item }) => {
+          const isAllowed = canPlayerAccessDocument(currentPlayer, item);
+          return (
+            <View
+              style={[
+                styles.documentCard,
+                !isAllowed && {
+                  backgroundColor: '#F8FAFC',
+                  borderColor: '#CBD5E1',
+                },
+              ]}
             >
-              <View style={styles.pdfIcon}>
+              <Pressable
+                accessibilityLabel={
+                  isAllowed
+                    ? `Ler documento ${item.title}`
+                    : `Documento restrito ${item.title}`
+                }
+                accessibilityRole="button"
+                onPress={() => {
+                  if (!isAllowed) {
+                    handleRestrictedDocumentAlert(item);
+                    return;
+                  }
+                  setSelectedDoc(item);
+                }}
+                style={styles.documentReadArea}
+              >
+                <View
+                  style={[
+                    styles.pdfIcon,
+                    !isAllowed && { backgroundColor: '#E2E8F0' },
+                  ]}
+                >
+                  <SymbolView
+                    name={{
+                      ios: isAllowed ? 'doc.richtext.fill' : 'lock.fill',
+                      android: isAllowed ? 'picture_as_pdf' : 'lock',
+                      web: isAllowed ? 'picture_as_pdf' : 'lock',
+                    }}
+                    size={22}
+                    tintColor={isAllowed ? BrandColors.red : '#64748B'}
+                  />
+                  <Text
+                    style={[
+                      styles.pdfLabel,
+                      !isAllowed && { color: '#475569' },
+                    ]}
+                  >
+                    {isAllowed ? 'PDF' : 'RESTR.'}
+                  </Text>
+                </View>
+                <View style={styles.documentCopy}>
+                  <View className="flex-row flex-wrap items-center gap-1.5">
+                    <View
+                      className={`rounded-full px-2 py-0.5 ${
+                        isAllowed ? 'bg-emerald-100' : 'bg-amber-100'
+                      }`}
+                    >
+                      <Text
+                        className={`text-[10px] font-bold ${
+                          isAllowed ? 'text-emerald-800' : 'text-amber-800'
+                        }`}
+                      >
+                        {isAllowed ? 'Liberado' : '🔒 Restrito'} •{' '}
+                        {item.accessLabel}
+                      </Text>
+                    </View>
+                  </View>
+                  <Text
+                    style={[
+                      styles.documentTitle,
+                      !isAllowed && { color: '#475569' },
+                    ]}
+                  >
+                    {item.title}
+                  </Text>
+                  <Text style={styles.documentMeta}>
+                    {item.category} • {item.size}
+                  </Text>
+                  <Text
+                    className={`text-[11px] font-medium ${
+                      isAllowed ? 'text-emerald-700' : 'text-amber-700'
+                    }`}
+                  >
+                    {isAllowed
+                      ? `Toque para ler • Revisão: ${item.updatedAt}`
+                      : `Acesso bloqueado (requer Nível ${item.minHierarchyLevel})`}
+                  </Text>
+                </View>
+              </Pressable>
+              <Pressable
+                accessibilityLabel={
+                  isAllowed
+                    ? `Gerar e compartilhar PDF de ${item.title}`
+                    : `Exportação bloqueada de ${item.title}`
+                }
+                accessibilityRole="button"
+                disabled={isExportingId === item.id}
+                onPress={() => void handleExportPdf(item)}
+                style={[
+                  styles.downloadButton,
+                  !isAllowed && { backgroundColor: '#FEF3C7' },
+                ]}
+              >
                 <SymbolView
                   name={{
-                    ios: 'doc.richtext.fill',
-                    android: 'picture_as_pdf',
-                    web: 'picture_as_pdf',
+                    ios: isAllowed ? 'square.and.arrow.up' : 'lock.fill',
+                    android: isAllowed ? 'download' : 'lock',
+                    web: isAllowed ? 'download' : 'lock',
                   }}
-                  size={23}
-                  tintColor={BrandColors.red}
+                  size={19}
+                  tintColor={isAllowed ? BrandColors.green : '#B45309'}
                 />
-                <Text style={styles.pdfLabel}>PDF</Text>
-              </View>
-              <View style={styles.documentCopy}>
-                <Text style={styles.documentTitle}>{item.title}</Text>
-                <Text style={styles.documentMeta}>
-                  {item.category} • {item.size}
-                </Text>
-                <Text className="text-[11px] font-medium text-emerald-700">
-                  Toque para ler • Revisão: {item.updatedAt}
-                </Text>
-              </View>
-            </Pressable>
-            <Pressable
-              accessibilityLabel={`Gerar e compartilhar PDF de ${item.title}`}
-              accessibilityRole="button"
-              disabled={isExportingId === item.id}
-              onPress={() => void handleExportPdf(item)}
-              style={styles.downloadButton}
-            >
-              <SymbolView
-                name={{
-                  ios: 'square.and.arrow.up',
-                  android: 'download',
-                  web: 'download',
-                }}
-                size={20}
-                tintColor={BrandColors.green}
-              />
-            </Pressable>
-          </View>
-        )}
+              </Pressable>
+            </View>
+          );
+        }}
       />
 
       {/* Modal de Leitura Integral e Exportação de PDF */}

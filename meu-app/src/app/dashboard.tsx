@@ -1,6 +1,13 @@
-import { Link } from 'expo-router';
+import { Link, useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  Alert,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BrandColors, Fonts, Spacing } from '@/constants/theme';
@@ -10,6 +17,7 @@ import {
   calculateFinancialSummary,
   calculateGameAttendance,
 } from '@/utils/calculations';
+import { extractMonthYear, getPlayerPermissions } from '@/utils/validations';
 
 function AppSymbol({
   name,
@@ -24,14 +32,24 @@ function AppSymbol({
 }
 
 export default function PlayerDashboardScreen() {
+  const router = useRouter();
   const currentPlayer = useAppStore((state) => state.currentPlayer);
   const games = useAppStore((state) => state.games);
   const guests = useAppStore((state) => state.guests);
   const financialMetric = useAppStore((state) => state.financialMetric);
 
+  const permissions = getPlayerPermissions(currentPlayer);
   const firstName = currentPlayer.name.split(' ')[0] || 'Atleta';
+
+  // Prioriza exibir a próxima partida em que o atleta está confirmado, ou a próxima disponível
   const nextGame =
-    games.find((item) => item.phase === 'available') ?? games[0];
+    games.find(
+      (item) =>
+        item.phase === 'available' &&
+        item.attendance.confirmedPlayers.includes(currentPlayer.name)
+    ) ??
+    games.find((item) => item.phase === 'available') ??
+    games[0];
 
   const financialSummary = calculateFinancialSummary(financialMetric);
   const attendanceStats = calculateGameAttendance(nextGame.attendance);
@@ -49,47 +67,109 @@ export default function PlayerDashboardScreen() {
     guestRevenue
   );
 
-  const approvedGuestsTotal = guests.filter(
-    (guest) => guest.status === 'Aprovado'
+  const pendingGuestsCount = guests.filter(
+    (guest) => guest.status === 'Pendente'
   ).length;
+
+  const myInvitesInCurrentMonth = guests.filter(
+    (guest) =>
+      guest.invitedByPlayerId === currentPlayer.id &&
+      guest.status !== 'Reprovado' &&
+      extractMonthYear(guest.date) === financialMetric.referenceMonth
+  );
 
   const isPlayerConfirmed = nextGame.attendance.confirmedPlayers.includes(
     currentPlayer.name
   );
+  const isPlayerDeclined = (
+    nextGame.declinedPlayers ??
+    nextGame.attendance.declinedPlayers ??
+    []
+  ).includes(currentPlayer.name);
+
+  // Card de convidados personalizado conforme o nível hierárquico do perfil logado
+  const guestMetricCard = permissions.canApproveGuests
+    ? {
+        id: 'guests',
+        title: 'Gestão Convites',
+        value: `${pendingGuestsCount} pend.`,
+        detail: `${approvedGuestsInNextGame.length}/${nextGame.maxGuestsPerGame} no próx. jogo`,
+        icon: { ios: 'person.2', android: 'group', web: 'group' },
+        iconColor: '#C07A2C',
+        valueStyle: 'metricValueAmber' as const,
+      }
+    : permissions.canInviteGuests
+      ? {
+          id: 'guests',
+          title: 'Minha Cota (Mês)',
+          value: `${myInvitesInCurrentMonth.length}/${permissions.monthlyGuestQuota}`,
+          detail:
+            myInvitesInCurrentMonth.length > 0
+              ? `1 convite (${myInvitesInCurrentMonth[0].status.toLowerCase()})`
+              : '1 convite disponível',
+          icon: { ios: 'person.2', android: 'group', web: 'group' },
+          iconColor: BrandColors.green,
+          valueStyle: 'metricValueGreen' as const,
+        }
+      : permissions.canAccessGuests
+        ? {
+            id: 'guests',
+            title: 'Convites',
+            value: 'Leitura',
+            detail: 'Sem cota p/ convidar',
+            icon: { ios: 'eye', android: 'visibility', web: 'visibility' },
+            iconColor: BrandColors.navy,
+            valueStyle: 'metricValueNavy' as const,
+          }
+        : {
+            id: 'guests',
+            title: 'Convites',
+            value: 'Bloqueado',
+            detail: 'Sem acesso (Nível 4)',
+            icon: { ios: 'lock.fill', android: 'lock', web: 'lock' },
+            iconColor: BrandColors.red,
+            valueStyle: 'metricValueNavy' as const,
+          };
 
   const dashboardMetrics = [
     {
       id: 'fee',
       title: 'Saldo Devedor',
       value: financialSummary.formattedBalance,
-      detail: financialSummary.derivedStatus.toLowerCase(),
+      detail:
+        financialSummary.creditBalance > 0
+          ? `+R$ ${financialSummary.creditBalance.toFixed(2).replace('.', ',')} crédito`
+          : financialSummary.derivedStatus.toLowerCase(),
       icon: { ios: 'banknote', android: 'payments', web: 'payments' },
       iconColor: BrandColors.green,
       valueStyle: 'metricValueGreen' as const,
     },
     {
-      id: 'penalties',
-      title: 'Penalidades',
-      value: String(financialMetric.penaltiesCount),
-      detail: 'ativas no mês',
+      id: 'stats',
+      title: 'Ficha Técnica',
+      value: `${currentPlayer.goalsScored} gols`,
+      detail: `${currentPlayer.gamesPlayed} jogos • ${currentPlayer.preferredFoot}`,
       icon: {
-        ios: 'exclamationmark.shield',
-        android: 'gpp_bad',
-        web: 'gpp_bad',
+        ios: 'sportscourt',
+        android: 'emoji_events',
+        web: 'emoji_events',
       },
       iconColor: BrandColors.navy,
       valueStyle: 'metricValueNavy' as const,
     },
-    {
-      id: 'guests',
-      title: 'Convidados',
-      value: `${approvedGuestsInNextGame.length}/${nextGame.maxGuestsPerGame}`,
-      detail: `${approvedGuestsTotal} aprovados`,
-      icon: { ios: 'person.2', android: 'group', web: 'group' },
-      iconColor: '#C07A2C',
-      valueStyle: 'metricValueAmber' as const,
-    },
+    guestMetricCard,
   ];
+
+  const handlePressGuestsShortcut = () => {
+    if (!permissions.canAccessGuests) {
+      Alert.alert(
+        'Acesso Negado — Hierarquia de Perfil',
+        `Olá, ${currentPlayer.name}!\n\nSeu perfil atual é "${permissions.hierarchyLabel}".\n\nConforme as regras da Associação Gestão Bola, atletas da categoria Diarista não têm permissão para acessar a lista de convidados nem realizar convites.`
+      );
+      return;
+    }
+    router.push('/guests');
+  };
 
   return (
     <SafeAreaView edges={['top']} style={styles.safeArea}>
@@ -136,26 +216,37 @@ export default function PlayerDashboardScreen() {
           <View style={styles.welcomeRow}>
             <View style={styles.welcomeCopy}>
               <Text style={styles.welcomeTitle}>Olá, {firstName}! 👋</Text>
-              <Text style={styles.welcomeSubtitle}>Seu painel do jogador</Text>
-              <View className="mt-2 flex-row flex-wrap items-center gap-2">
-                <View className="rounded-full bg-emerald-100 px-3 py-1">
-                  <Text className="text-xs font-semibold text-emerald-800">
+              <Text style={styles.welcomeSubtitle}>
+                {currentPlayer.hierarchyTitle} • {currentPlayer.position}
+              </Text>
+              <View className="mt-2 flex-row flex-wrap items-center gap-1.5">
+                <View className="rounded-full bg-slate-900 px-2.5 py-1">
+                  <Text className="text-[11px] font-bold text-amber-400">
+                    {permissions.hierarchyLabel}
+                  </Text>
+                </View>
+                <View className="rounded-full bg-emerald-100 px-2.5 py-1">
+                  <Text className="text-[11px] font-semibold text-emerald-800">
                     {currentPlayer.membershipStatus} • #
                     {currentPlayer.shirtNumber}
                   </Text>
                 </View>
                 <View
-                  className={`rounded-full px-3 py-1 ${
+                  className={`rounded-full px-2.5 py-1 ${
                     financialSummary.derivedStatus === 'Regular'
                       ? 'bg-emerald-50'
-                      : 'bg-amber-100'
+                      : financialSummary.derivedStatus === 'Atrasado'
+                        ? 'bg-red-100'
+                        : 'bg-amber-100'
                   }`}
                 >
                   <Text
-                    className={`text-xs font-semibold ${
+                    className={`text-[11px] font-semibold ${
                       financialSummary.derivedStatus === 'Regular'
                         ? 'text-emerald-700'
-                        : 'text-amber-800'
+                        : financialSummary.derivedStatus === 'Atrasado'
+                          ? 'text-red-800'
+                          : 'text-amber-800'
                     }`}
                   >
                     Finanças: {financialSummary.derivedStatus}
@@ -176,13 +267,35 @@ export default function PlayerDashboardScreen() {
             </View>
           </View>
 
+          {/* Resumo individual de permissões da hierarquia do perfil logado */}
+          <View className="mb-3 rounded-lg border border-slate-200 bg-white p-3">
+            <View className="flex-row items-center justify-between">
+              <Text className="text-xs font-bold text-slate-900">
+                Permissões do seu perfil ({currentPlayer.role} •{' '}
+                {currentPlayer.membershipStatus})
+              </Text>
+              <Text className="text-[11px] font-bold text-emerald-700">
+                 Camisa #{currentPlayer.shirtNumber}
+              </Text>
+            </View>
+            <Text className="mt-1 text-xs leading-4 text-slate-600">
+              {permissions.hierarchyDescription}
+            </Text>
+          </View>
+
           <View style={styles.nextGameCard}>
             <View style={styles.nextGameTopline}>
-              <Text style={styles.nextGameEyebrow}>PRÓXIMA PELADA</Text>
+              <Text style={styles.nextGameEyebrow}>
+                SUA PRÓXIMA PELADA ({nextGame.competition.toUpperCase()})
+              </Text>
               <View style={styles.statusPill}>
                 <View style={styles.statusDot} />
                 <Text style={styles.statusText}>
-                  {isPlayerConfirmed ? 'Confirmado' : nextGame.status}
+                  {isPlayerConfirmed
+                    ? 'Você está Confirmado'
+                    : isPlayerDeclined
+                      ? 'Ausência Justificada'
+                      : 'Resposta Pendente'}
                 </Text>
               </View>
             </View>
@@ -240,7 +353,9 @@ export default function PlayerDashboardScreen() {
                 >
                   {metric.value}
                 </Text>
-                <Text style={styles.metricDetail}>{metric.detail}</Text>
+                <Text numberOfLines={1} style={styles.metricDetail}>
+                  {metric.detail}
+                </Text>
               </View>
             ))}
           </View>
@@ -336,7 +451,13 @@ export default function PlayerDashboardScreen() {
               <Text style={styles.actionTitle}>Gestão rápida</Text>
             </View>
             <Text style={styles.actionDescription}>
-              Confirme presença nas partidas ou gerencie os convidados do mês.
+              {permissions.canApproveGuests
+                ? 'Diretoria: gerencie partidas, aprove convites pendentes ou aplique penalidades.'
+                : permissions.canInviteGuests
+                  ? 'Sócio: confirme presença na partida ou envie até 1 convite no mês.'
+                  : permissions.canAccessGuests
+                    ? 'Mensalista: confirme presença ou consulte a lista de convidados (sem cota para convidar).'
+                    : 'Diarista: confirme presença nas partidas disponíveis (acesso a convidados bloqueado).'}
             </Text>
             <View className="flex-row gap-2">
               <Link
@@ -359,16 +480,26 @@ export default function PlayerDashboardScreen() {
                   />
                 </Pressable>
               </Link>
-              <Link href="/guests" asChild>
-                <Pressable
-                  accessibilityRole="button"
-                  style={styles.secondaryActionButton}
+              <Pressable
+                accessibilityRole="button"
+                onPress={handlePressGuestsShortcut}
+                style={[
+                  styles.secondaryActionButton,
+                  !permissions.canAccessGuests && styles.lockedActionButton,
+                ]}
+              >
+                <Text
+                  className={`text-sm font-bold ${
+                    permissions.canAccessGuests
+                      ? 'text-emerald-800'
+                      : 'text-red-700'
+                  }`}
                 >
-                  <Text className="text-sm font-bold text-emerald-800">
-                    Convidados
-                  </Text>
-                </Pressable>
-              </Link>
+                  {permissions.canAccessGuests
+                    ? 'Convidados'
+                    : '🔒 Convidados'}
+                </Text>
+              </Pressable>
             </View>
           </View>
         </View>
@@ -424,6 +555,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    paddingVertical: Spacing.two,
   },
   welcomeCopy: {
     flex: 1,
@@ -438,7 +570,7 @@ const styles = StyleSheet.create({
   welcomeSubtitle: {
     color: BrandColors.muted,
     fontFamily: Fonts.sans,
-    fontSize: 14,
+    fontSize: 13,
     marginTop: Spacing.one,
   },
   ballIllustration: {
@@ -470,6 +602,7 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     letterSpacing: 0,
+    flexShrink: 1,
   },
   statusPill: {
     backgroundColor: BrandColors.greenSoft,
@@ -659,15 +792,6 @@ const styles = StyleSheet.create({
     marginTop: Spacing.two,
     marginBottom: Spacing.three,
   },
-  actionButton: {
-    minHeight: 48,
-    borderRadius: 8,
-    backgroundColor: BrandColors.green,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: Spacing.two,
-  },
   actionButtonFlex: {
     flex: 1,
     minHeight: 48,
@@ -689,6 +813,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 12,
+  },
+  lockedActionButton: {
+    borderColor: '#FCA5A5',
+    backgroundColor: '#FEF2F2',
   },
   actionButtonText: {
     color: '#FFFFFF',

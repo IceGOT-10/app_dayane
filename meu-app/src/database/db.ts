@@ -4,7 +4,9 @@
  *
  * OBJETIVO PEDAGÓGICO (Sabatina Profª Dayane):
  * No Android e iOS (Expo Go), este módulo cria e gerencia tabelas relacionais reais no SQLite
- * (`players`, `games`, `guests`, `financial_metrics`, `transactions` e `documents`).
+ * (`players`, `games`, `guests`, `financial_metrics`, `transactions` e `documents`) contendo
+ * as colunas de hierarquia de acesso (`hierarchyLevel`, `hierarchyTitle`, `minHierarchyLevel`)
+ * e dados individuais de cada perfil (`preferredFoot`, `goalsScored`, `gamesPlayed`, `profileBio`).
  * Quando executado no navegador Web (`Platform.OS === 'web'`) ou em ambientes onde o driver
  * nativo SQLite não esteja ativo, o módulo aciona automaticamente o fallback seguro via
  * `AsyncStorage`, garantindo funcionamento multiplataforma idêntico e persistência da sessão.
@@ -33,21 +35,24 @@ import type {
   GameStatus,
   Guest,
   GuestStatus,
+  HierarchyLevel,
   PaymentMethod,
   Player,
   PlayerMembershipStatus,
   PlayerRole,
+  PreferredFoot,
   TransactionType,
 } from '@/types/ball-management';
+import { deriveHierarchyLevel } from '@/utils/validations';
 
 const STORAGE_KEYS = {
-  PLAYERS: '@gestao_bola:players_v1',
-  GAMES: '@gestao_bola:games_v1',
-  GUESTS: '@gestao_bola:guests_v1',
-  METRICS: '@gestao_bola:metrics_v1',
-  TRANSACTIONS: '@gestao_bola:transactions_v1',
-  DOCUMENTS: '@gestao_bola:documents_v1',
-  SESSION_PLAYER_ID: '@gestao_bola:session_player_id_v1',
+  PLAYERS: '@gestao_bola:players_v2',
+  GAMES: '@gestao_bola:games_v2',
+  GUESTS: '@gestao_bola:guests_v2',
+  METRICS: '@gestao_bola:metrics_v2',
+  TRANSACTIONS: '@gestao_bola:transactions_v2',
+  DOCUMENTS: '@gestao_bola:documents_v2',
+  SESSION_PLAYER_ID: '@gestao_bola:session_player_id_v2',
 } as const;
 
 export interface DatabaseSnapshot {
@@ -71,6 +76,12 @@ interface PlayerRow {
   shirtNumber: number;
   membershipStatus: string;
   role: string;
+  hierarchyLevel: number;
+  hierarchyTitle: string;
+  preferredFoot: string;
+  goalsScored: number;
+  gamesPlayed: number;
+  profileBio: string;
   isActive: number;
 }
 
@@ -132,6 +143,8 @@ interface DocumentRow {
   category: string;
   size: string;
   updatedAt: string;
+  minHierarchyLevel: number;
+  accessLabel: string;
   content: string;
 }
 
@@ -147,7 +160,7 @@ async function getSqliteDb(): Promise<SQLite.SQLiteDatabase | null> {
   }
 
   try {
-    const db = await SQLite.openDatabaseAsync('gestao_bola.db');
+    const db = await SQLite.openDatabaseAsync('gestao_bola_v2.db');
     await db.execAsync(`
       PRAGMA journal_mode = WAL;
 
@@ -162,6 +175,12 @@ async function getSqliteDb(): Promise<SQLite.SQLiteDatabase | null> {
         shirtNumber INTEGER NOT NULL,
         membershipStatus TEXT NOT NULL,
         role TEXT NOT NULL,
+        hierarchyLevel INTEGER NOT NULL DEFAULT 4,
+        hierarchyTitle TEXT NOT NULL DEFAULT 'Atleta',
+        preferredFoot TEXT NOT NULL DEFAULT 'Destro',
+        goalsScored INTEGER NOT NULL DEFAULT 0,
+        gamesPlayed INTEGER NOT NULL DEFAULT 0,
+        profileBio TEXT NOT NULL DEFAULT '',
         isActive INTEGER NOT NULL DEFAULT 1
       );
 
@@ -223,6 +242,8 @@ async function getSqliteDb(): Promise<SQLite.SQLiteDatabase | null> {
         category TEXT NOT NULL,
         size TEXT NOT NULL,
         updatedAt TEXT NOT NULL,
+        minHierarchyLevel INTEGER NOT NULL DEFAULT 4,
+        accessLabel TEXT NOT NULL DEFAULT 'Público',
         content TEXT NOT NULL
       );
     `);
@@ -247,16 +268,7 @@ function safeJsonParse<T>(raw: string | null | undefined, fallback: T): T {
 }
 
 /**
- * Fila de escrita do SQLite (correção de condição de corrida).
- *
- * PROBLEMA ORIGINAL: o Zustand dispara várias gravações com `void saveXToDb(...)` sem aguardar.
- * Cada gravação faz `DELETE` + vários `INSERT`; se duas chamadas rodassem ao mesmo tempo, o
- * `DELETE` da segunda apagava linhas no meio dos `INSERT` da primeira e causava erro de chave
- * primária duplicada (UNIQUE constraint) em uma promessa sem tratamento.
- *
- * SOLUÇÃO: encadeamos cada escrita na promessa anterior (execução estritamente sequencial) e
- * envolvemos `DELETE` + `INSERT`s em uma transação (`withTransactionAsync`), que é atômica:
- * ou grava tudo ou desfaz tudo, nunca deixando a tabela pela metade.
+ * Fila de escrita do SQLite (prevenção de condição de corrida em transações atômicas).
  */
 let sqliteWriteQueue: Promise<void> = Promise.resolve();
 
@@ -274,7 +286,6 @@ function enqueueSqliteWrite(
         await task(db);
       });
     } catch (error: unknown) {
-      // Falha de persistência não pode derrubar o app: registramos o diagnóstico e seguimos.
       console.error(`[db] Falha ao gravar "${label}" no SQLite:`, error);
     }
   };
@@ -298,8 +309,8 @@ export async function savePlayersToDb(players: Player[]): Promise<void> {
     await db.runAsync('DELETE FROM players;');
     for (const p of players) {
       await db.runAsync(
-        `INSERT INTO players (id, name, email, password, phone, joinedAt, position, shirtNumber, membershipStatus, role, isActive)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+        `INSERT INTO players (id, name, email, password, phone, joinedAt, position, shirtNumber, membershipStatus, role, hierarchyLevel, hierarchyTitle, preferredFoot, goalsScored, gamesPlayed, profileBio, isActive)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
         p.id,
         p.name,
         p.email,
@@ -310,6 +321,12 @@ export async function savePlayersToDb(players: Player[]): Promise<void> {
         p.shirtNumber,
         p.membershipStatus,
         p.role,
+        p.hierarchyLevel,
+        p.hierarchyTitle,
+        p.preferredFoot,
+        p.goalsScored,
+        p.gamesPlayed,
+        p.profileBio,
         p.isActive ? 1 : 0
       );
     }
@@ -466,13 +483,15 @@ export async function saveDocumentsToDb(
     await db.runAsync('DELETE FROM documents;');
     for (const doc of documents) {
       await db.runAsync(
-        `INSERT INTO documents (id, title, category, size, updatedAt, content)
-         VALUES (?, ?, ?, ?, ?, ?);`,
+        `INSERT INTO documents (id, title, category, size, updatedAt, minHierarchyLevel, accessLabel, content)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?);`,
         doc.id,
         doc.title,
         doc.category,
         doc.size,
         doc.updatedAt,
+        doc.minHierarchyLevel,
+        doc.accessLabel,
         doc.content
       );
     }
@@ -538,19 +557,34 @@ export async function loadDatabaseSnapshot(): Promise<DatabaseSnapshot> {
       'SELECT * FROM documents;'
     );
 
-    const players: Player[] = playerRows.map((row) => ({
-      id: row.id,
-      name: row.name,
-      email: row.email,
-      password: row.password,
-      phone: row.phone,
-      joinedAt: row.joinedAt,
-      position: row.position,
-      shirtNumber: Number(row.shirtNumber),
-      membershipStatus: row.membershipStatus as PlayerMembershipStatus,
-      role: (row.role as PlayerRole) || 'Atleta',
-      isActive: Boolean(row.isActive),
-    }));
+    const players: Player[] = playerRows.map((row) => {
+      const role = (row.role as PlayerRole) || 'Atleta';
+      const membershipStatus =
+        (row.membershipStatus as PlayerMembershipStatus) || 'Diarista';
+      const fallbackLevel = deriveHierarchyLevel(role, membershipStatus);
+
+      return {
+        id: row.id,
+        name: row.name,
+        email: row.email,
+        password: row.password,
+        phone: row.phone,
+        joinedAt: row.joinedAt,
+        position: row.position,
+        shirtNumber: Number(row.shirtNumber),
+        membershipStatus,
+        role,
+        hierarchyLevel: (Number(row.hierarchyLevel) ||
+          fallbackLevel) as HierarchyLevel,
+        hierarchyTitle:
+          row.hierarchyTitle || `${membershipStatus} (Nível ${fallbackLevel})`,
+        preferredFoot: (row.preferredFoot as PreferredFoot) || 'Destro',
+        goalsScored: Number(row.goalsScored) || 0,
+        gamesPlayed: Number(row.gamesPlayed) || 0,
+        profileBio: row.profileBio || '',
+        isActive: Boolean(row.isActive),
+      };
+    });
 
     const games: Game[] = gameRows.map((row) => {
       const parsedDeclined = safeJsonParse<string[]>(row.declinedPlayersJson, []);
@@ -637,6 +671,9 @@ export async function loadDatabaseSnapshot(): Promise<DatabaseSnapshot> {
             category: row.category,
             size: row.size,
             updatedAt: row.updatedAt,
+            minHierarchyLevel: (Number(row.minHierarchyLevel) ||
+              4) as HierarchyLevel,
+            accessLabel: row.accessLabel || 'Público • Todos os Perfis',
             content: row.content,
           }))
         : SEED_DOCUMENTS;
@@ -707,4 +744,3 @@ export async function loadDatabaseSnapshot(): Promise<DatabaseSnapshot> {
     sessionPlayerId,
   };
 }
-

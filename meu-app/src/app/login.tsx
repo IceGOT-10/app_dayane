@@ -28,6 +28,7 @@ import {
   type RegisterPlayerFormData,
 } from '@/schemas/forms.schema';
 import { useAppStore } from '@/store/useAppStore';
+import { getPlayerPermissions } from '@/utils/validations';
 
 export default function LoginScreen() {
   const [showPassword, setShowPassword] = useState<boolean>(false);
@@ -155,11 +156,12 @@ export default function LoginScreen() {
       return;
     }
 
+    const perms = getPlayerPermissions(result.sanitizedValue);
     resetRegisterForm();
     setRegisterModalVisible(false);
     Alert.alert(
       'Cadastro concluído!',
-      `Bem-vindo ao Gestão Bola, ${result.sanitizedValue.name}! Sua sessão já foi iniciada.`
+      `Bem-vindo ao Gestão Bola, ${result.sanitizedValue.name}!\nHierarquia atribuída: ${perms.hierarchyLabel}.`
     );
     router.replace('/dashboard');
   };
@@ -183,7 +185,7 @@ export default function LoginScreen() {
             Gestão Bola
           </Text>
           <Text className="text-sm text-slate-400">
-            Autenticação integrada ao banco local de atletas
+            Autenticação com controle de acesso por hierarquia de perfis
           </Text>
         </View>
 
@@ -321,34 +323,70 @@ export default function LoginScreen() {
             )}
           </TouchableOpacity>
 
-          {/* Atalhos rápidos de contas para demonstração na banca */}
+          {/* Atalhos rápidos de contas com níveis hierárquicos para demonstração na banca */}
           <View className="mt-5 rounded-xl border border-slate-800 bg-slate-800/60 p-3">
-            <Text className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-              Contas do Banco Local (Toque para preencher)
+            <Text className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-300">
+              Perfis por Hierarquia (Toque para preencher login)
+            </Text>
+            <Text className="mb-2.5 text-[10px] text-slate-400">
+              Cada conta possui permissões e dados próprios no banco local:
             </Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
               <View className="flex-row gap-2">
-                {players.map((p) => (
-                  <Pressable
-                    key={p.id}
-                    accessibilityRole="button"
-                    onPress={() => {
-                      setAuthError(null);
-                      setValue('email', p.email, { shouldValidate: true });
-                      setValue('password', p.password, {
-                        shouldValidate: true,
-                      });
-                    }}
-                    className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5"
-                  >
-                    <Text className="text-xs font-bold text-emerald-400">
-                      {p.name.split(' ')[0]} ({p.membershipStatus})
-                    </Text>
-                    <Text className="text-[10px] text-slate-400">
-                      {p.email}
-                    </Text>
-                  </Pressable>
-                ))}
+                {players.map((p) => {
+                  const perms = getPlayerPermissions(p);
+                  const guestTag = perms.canApproveGuests
+                    ? 'Aprova e cria convites'
+                    : perms.canInviteGuests
+                      ? 'Cria 1 convite/mês'
+                      : perms.canAccessGuests
+                        ? 'S/ convidar (Só leitura)'
+                        : 'Sem acesso a convites';
+
+                  return (
+                    <Pressable
+                      key={p.id}
+                      accessibilityRole="button"
+                      onPress={() => {
+                        setAuthError(null);
+                        setValue('email', p.email, { shouldValidate: true });
+                        setValue('password', p.password, {
+                          shouldValidate: true,
+                        });
+                      }}
+                      className="w-48 rounded-lg border border-slate-700 bg-slate-900 p-2.5"
+                    >
+                      <View className="flex-row items-center justify-between">
+                        <Text className="text-xs font-bold text-emerald-400">
+                          {p.name.split(' ')[0]} #{p.shirtNumber}
+                        </Text>
+                        <View className="rounded bg-slate-800 px-1.5 py-0.5">
+                          <Text className="text-[9px] font-bold text-amber-400">
+                            Nível {perms.hierarchyLevel}
+                          </Text>
+                        </View>
+                      </View>
+                      <Text
+                        numberOfLines={1}
+                        className="mt-0.5 text-[10px] font-semibold text-slate-200"
+                      >
+                        {p.role} • {p.membershipStatus}
+                      </Text>
+                      <Text
+                        numberOfLines={1}
+                        className="mt-0.5 text-[10px] text-slate-400"
+                      >
+                        {guestTag}
+                      </Text>
+                      <Text
+                        numberOfLines={1}
+                        className="mt-1 text-[9px] text-slate-500"
+                      >
+                        {p.email}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
               </View>
             </ScrollView>
           </View>
@@ -369,7 +407,7 @@ export default function LoginScreen() {
             </TouchableOpacity>
           </View>
           <Text className="text-xs text-slate-500">
-            Acesso da diretoria e atletas • Gestão Bola 2026
+            Hierarquia de 4 níveis • Gestão Bola 2026
           </Text>
         </View>
       </ScrollView>
@@ -477,7 +515,7 @@ export default function LoginScreen() {
                 Cadastro de Novo Atleta
               </Text>
               <Text className="mt-1 text-xs text-slate-500">
-                Preencha seus dados para ingressar no quadro de atletas do
+                Preencha seus dados e escolha sua categoria na hierarquia do
                 Gestão Bola.
               </Text>
 
@@ -632,37 +670,46 @@ export default function LoginScreen() {
               ) : null}
 
               <Text className="mb-1 mt-3 text-xs font-semibold text-slate-700">
-                Modalidade de Associação
+                Modalidade e Nível de Hierarquia
               </Text>
               <Controller
                 control={registerControl}
                 name="membershipStatus"
                 render={({ field: { onChange, value } }) => (
-                  <View className="flex-row gap-2">
-                    {(['Sócio', 'Mensalista', 'Diarista'] as const).map(
-                      (option) => (
-                        <Pressable
-                          key={option}
-                          accessibilityRole="button"
-                          onPress={() => onChange(option)}
-                          className={`flex-1 items-center rounded-lg border py-2 ${
-                            value === option
-                              ? 'border-emerald-700 bg-emerald-50'
-                              : 'border-slate-300 bg-white'
-                          }`}
-                        >
-                          <Text
-                            className={`text-xs font-bold ${
+                  <View>
+                    <View className="flex-row gap-2">
+                      {(['Sócio', 'Mensalista', 'Diarista'] as const).map(
+                        (option) => (
+                          <Pressable
+                            key={option}
+                            accessibilityRole="button"
+                            onPress={() => onChange(option)}
+                            className={`flex-1 items-center rounded-lg border py-2 ${
                               value === option
-                                ? 'text-emerald-900'
-                                : 'text-slate-600'
+                                ? 'border-emerald-700 bg-emerald-50'
+                                : 'border-slate-300 bg-white'
                             }`}
                           >
-                            {option}
-                          </Text>
-                        </Pressable>
-                      )
-                    )}
+                            <Text
+                              className={`text-xs font-bold ${
+                                value === option
+                                  ? 'text-emerald-900'
+                                  : 'text-slate-600'
+                              }`}
+                            >
+                              {option}
+                            </Text>
+                          </Pressable>
+                        )
+                      )}
+                    </View>
+                    <Text className="mt-1.5 text-[11px] text-slate-500">
+                      {value === 'Sócio'
+                        ? 'Nível 2: Pode acessar Convidados e indicar até 1 convidado/mês.'
+                        : value === 'Mensalista'
+                          ? 'Nível 3: Visualiza convidados, mas NÃO possui permissão para convidar.'
+                          : 'Nível 4: Acesso restrito às partidas; NÃO possui acesso a Convidados.'}
+                    </Text>
                   </View>
                 )}
               />
