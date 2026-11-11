@@ -345,7 +345,7 @@ export default function PlayerDashboardScreen() {
               >
                 <Pressable
                   accessibilityRole="button"
-                  style={[styles.actionButton, { flex: 1 }]}
+                  style={styles.actionButtonFlex}
                 >
                   <Text style={styles.actionButtonText}>Ver partida</Text>
                   <AppSymbol
@@ -362,7 +362,7 @@ export default function PlayerDashboardScreen() {
               <Link href="/guests" asChild>
                 <Pressable
                   accessibilityRole="button"
-                  className="min-h-[48px] flex-1 flex-row items-center justify-center rounded-lg border border-emerald-700 bg-emerald-50 px-3"
+                  style={styles.secondaryActionButton}
                 >
                   <Text className="text-sm font-bold text-emerald-800">
                     Convidados
@@ -667,6 +667,28 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: Spacing.two,
+  },
+  actionButtonFlex: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: 8,
+    backgroundColor: BrandColors.green,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.two,
+  },
+  secondaryActionButton: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: BrandColors.greenDark,
+    backgroundColor: BrandColors.greenSoft,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
   },
   actionButtonText: {
     color: '#FFFFFF',

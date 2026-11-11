@@ -6,11 +6,15 @@ import { BrandColors, Fonts, Spacing } from '@/constants/theme';
 
 type PlayerScreenHeaderProps = {
   title: string;
-  backHref?: '/' | '/games';
+  backHref?: '/dashboard' | '/games' | '/more';
   showBrand?: boolean;
 };
 
-export function PlayerScreenHeader({ title, backHref = '/', showBrand = false }: PlayerScreenHeaderProps) {
+export function PlayerScreenHeader({
+  title,
+  backHref = '/dashboard',
+  showBrand = false,
+}: PlayerScreenHeaderProps) {
   return (
     <View style={styles.header}>
       <Link href={backHref} asChild>
