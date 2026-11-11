@@ -96,6 +96,8 @@ Este diário registra as mudanças realizadas no projeto para facilitar a elabor
 - **Resolução do Build Web no Metro (`Worker chunk not found`)**:
   - Criação de `meu-app/src/database/db.web.ts` utilizando a convenção oficial do Expo/React Native de arquivos com sufixo de plataforma (`.web.ts`).
   - O arquivo Web roda puramente com `@react-native-async-storage/async-storage`, eliminando o carregamento dos Web Workers nativos do `expo-sqlite` no navegador e assegurando execução sem erros tanto no Expo Go móvel quanto na Web.
+- **Correção de Hidratação HTML na Web (`documents.tsx`)**:
+  - Remoção do aninhamento inválido de `<Pressable accessibilityRole="button">` dentro de outro `<Pressable>` nos cards de documentos em `meu-app/src/app/documents.tsx`, separando a área de leitura e o botão de geração de PDF em elementos irmãos.
 
 ---
 
@@ -136,7 +138,7 @@ app_dayane/
 │   │   │   └── guests/        # Gestão completa de convidados (CRUD + cotas)
 │   │   ├── components/        # Componentes visuais reutilizáveis (buttons.tsx, cabeçalhos)
 │   │   ├── constants/         # Cores, temas e configurações visuais
-│   │   ├── database/          # Persistência SQLite + AsyncStorage (db.ts) e dados iniciais (seed.ts)
+│   │   ├── database/          # Persistência SQLite + AsyncStorage (db.ts, db.web.ts) e seed (seed.ts)
 │   │   ├── hooks/             # Custom Hooks (tema, esquema de cores)
 │   │   ├── schemas/           # Esquemas de validação Zod (forms.schema.ts)
 │   │   ├── store/             # Estado global com Zustand sincronizado ao banco (useAppStore.ts)
@@ -160,24 +162,107 @@ app_dayane/
 ## 🚀 Como Executar o Projeto
 
 ### Pré-requisitos
-- **Node.js** (versão 20 ou superior)
-- **npm** instalado
-- Aplicativo **Expo Go** instalado no celular (Android ou iOS) ou emulador configurado.
+- **Node.js** (versão 20 LTS ou superior) e **npm** instalados.
+- Aplicativo **Expo Go** atualizado no celular (Android via Play Store ou iOS via App Store, compatível com **Expo SDK 57**), ou emulador Android/Simulador iOS configurado.
+- Celular e computador conectados na **mesma rede Wi-Fi** (para uso via LAN) ou uso do modo `--tunnel` caso a rede bloqueie portas locais.
 
-### Passos:
-1. Abra o terminal na pasta da aplicação:
+### Passo a Passo para Rodar
+1. Abra o terminal e entre na pasta da aplicação (todos os comandos devem ser executados dentro de `meu-app/`):
    ```bash
    cd meu-app
    ```
-2. Instale as dependências:
+2. Instale as dependências do projeto:
    ```bash
    npm install
    ```
-3. Inicie o servidor do Expo:
+3. Inicie o servidor de desenvolvimento do Expo (recomenda-se `--clear` na primeira execução ou após atualizar arquivos):
    ```bash
-   npx expo start
+   npx expo start --clear
    ```
-4. Escaneie o QR Code gerado pelo terminal no aplicativo **Expo Go** do seu celular, ou pressione `a` para emulador Android, `i` para simulador iOS ou `w` para rodar na Web.
+4. Escolha onde deseja abrir o aplicativo:
+   - **Celular físico (Expo Go):** Escaneie o QR Code exibido no terminal (no Android pelo próprio app Expo Go; no iOS pela câmera nativa).
+   - **Navegador Web:** Pressione `w` no terminal ou execute diretamente `npx expo start --web --clear`.
+   - **Emulador Android / Simulador iOS:** Pressione `a` (Android) ou `i` (iOS).
+   - **Rede restrita / Wi-Fi da faculdade (sem comunicação direta entre PC e celular):** Utilize o modo túnel:
+     ```bash
+     npx expo start --tunnel
+     ```
+
+### Contas de Teste (Banco Local Inicial)
+Na primeira execução, o banco é populado automaticamente (`src/database/seed.ts`). Na tela de login há botões de preenchimento rápido, mas você também pode digitar manualmente:
+- **Diretoria / Sócio:** `leonardooocio@hotmail.com` (senha: `123456`)
+- **Diretoria / Sócio:** `rafael@gestaobola.com` (senha: `123456`)
+- **Atleta / Sócio:** `luan@gestaobola.com` (senha: `123456`)
+- **Atleta / Mensalista:** `kleytinn@gestaobola.com` (senha: `123456`)
+- **Atleta / Diarista:** `gabriel@gestaobola.com` (senha: `123456`)
+
+### Comandos de Verificação de Qualidade
+Antes de apresentar ou enviar alterações para o GitHub, valide o código dentro de `meu-app/`:
+```bash
+npx tsc --noEmit     # Verifica erros de TypeScript estrito (deve retornar 0 erros)
+npx expo lint        # Verifica regras de ESLint/Expo
+npx expo-doctor      # Verifica integridade das dependências do Expo SDK 57 (21/21 checks)
+```
+
+---
+
+## 🛠️ Solução de Problemas Comuns (Troubleshooting)
+
+Caso encontre algum erro ao instalar ou executar o aplicativo em outra máquina, siga as soluções abaixo dentro da pasta `meu-app/`:
+
+### 1. Erro de cache antigo, tela em branco ou alterações que não aparecem
+O Metro Bundler ou o NativeWind podem manter cache desatualizado após edições grandes.
+- **Solução:** Pare o servidor (`Ctrl + C`) e reinicie limpando todo o cache:
+  ```bash
+  npx expo start --clear
+  ```
+- No navegador Web, faça também um recarregamento forçado (`Ctrl + Shift + R` ou `Ctrl + F5`).
+
+### 2. Erro no Expo Go: *"Something went wrong"* / *"Could not connect to development server"* (Timeout)
+Geralmente ocorre quando o computador e o celular não estão na mesma sub-rede ou o Firewall do Windows bloqueia a porta `8081`.
+- **Solução 1 (Mais rápida):** Rode usando o túnel da Expo (já instalado no projeto via `@expo/ngrok`):
+  ```bash
+  npx expo start --tunnel
+  ```
+- **Solução 2:** Confira se o PC e o celular estão no mesmo Wi-Fi (redes públicas/universitárias costumam isolar dispositivos; use um roteador pessoal ou roteamento do celular).
+
+### 3. Erro *"Port 8081 is already in use"* (Porta ocupada)
+Existe outra instância do Metro rodando em segundo plano.
+- **Solução:** Encerre o terminal anterior ou execute em outra porta:
+  ```bash
+  npx expo start --port 8082
+  ```
+
+### 4. Erro de módulos faltando, conflito de versões ou falha após `git pull`
+Quando alguém instala um pacote novo e o seu `node_modules` local fica desatualizado, ou ao rodar `npm audit fix --force` acidentalmente.
+- **Solução:** Sincronize e alinhe as dependências exatamente para o Expo SDK 57:
+  ```bash
+  npm install
+  npx expo install --fix
+  ```
+  Se o erro persistir no Windows, apague a pasta `node_modules` e o `package-lock.json` e reinstale do zero:
+  ```powershell
+  Remove-Item -Recurse -Force node_modules, package-lock.json
+  npm install
+  npx expo start --clear
+  ```
+  *(Atenção: nunca execute `npm audit fix --force`, pois ele quebra as versões compatíveis do Expo SDK 57).*
+
+### 5. Erro no comando `npx` / execução de scripts bloqueada no PowerShell do Windows
+Se o Windows exibir *"a execução de scripts foi desabilitada neste sistema"*:
+- **Solução:** Execute uma única vez no PowerShell do usuário atual:
+  ```powershell
+  Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
+  ```
+
+### 6. Erro de incompatibilidade de versão no Expo Go (*"Project is incompatible with this version of Expo Go"*)
+O projeto utiliza **Expo SDK 57**.
+- **Solução:** Atualize o aplicativo **Expo Go** no celular pela Play Store / App Store, ou confira no terminal se está rodando dentro da pasta `meu-app/`.
+
+### 7. Dados desatualizados ou corrompidos no banco local durante testes
+Se você quiser restaurar todos os dados fictícios originais (`seed.ts`):
+- **No Navegador Web:** Abra o DevTools (`F12`) → aba **Application** (Aplicativo) → **Local Storage** → clique em **Clear All** (Limpar tudo) e recarregue a página (`F5`).
+- **No Celular (Expo Go):** Limpe os dados/cache do aplicativo Expo Go nas configurações do sistema ou desinstale e reabra o projeto.
 
 ---
 
