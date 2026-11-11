@@ -1,241 +1,192 @@
-import React, { useState } from 'react';
-import { 
-  StyleSheet, 
-  Text, 
-  TextInput, 
-  TouchableOpacity, 
-  View, 
-  KeyboardAvoidingView, 
-  Platform, 
-  ActivityIndicator,
-  StatusBar
-} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { zodResolver } from '@hookform/resolvers/zod';
 import { useRouter } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons'; // Certifique-se de ter instalado o @expo/vector-icons
+import React, { useState } from 'react';
+import { Controller, useForm } from 'react-hook-form';
+import {
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  StatusBar,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+
+import { loginSchema, type LoginFormData } from '@/schemas/forms.schema';
+import { useAppStore } from '@/store/useAppStore';
 
 export default function LoginScreen() {
-  const [email, setEmail] = useState<string>('');
-  const [password, setPassword] = useState<string>('');
   const [showPassword, setShowPassword] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [errorMessage, setErrorMessage] = useState<string>('');
-  
+
   const router = useRouter();
+  const authenticatePlayer = useAppStore((state) => state.authenticatePlayer);
+  const currentPlayerEmail = useAppStore((state) => state.currentPlayer.email);
 
-  const handleLogin = () => {
-    setErrorMessage('');
+  const {
+    control,
+    handleSubmit,
+    formState: { errors },
+  } = useForm<LoginFormData>({
+    resolver: zodResolver(loginSchema),
+    defaultValues: {
+      email: currentPlayerEmail,
+      password: '',
+    },
+  });
 
-    if (!email || !password) {
-      setErrorMessage('Preencha todos os campos para continuar.');
-      return;
-    }
-
+  const onSubmit = (data: LoginFormData) => {
     setIsLoading(true);
+    authenticatePlayer(data.email);
 
-    // Simulando uma requisição de autenticação de 1.5 segundos
     setTimeout(() => {
       setIsLoading(false);
-      // Aqui entraria sua lógica real de login (Firebase, API, etc.)
-      router.replace('/dashboard'); // Redireciona para a rota interna do app
-    }, 1500);
+      router.replace('/dashboard');
+    }, 600);
   };
 
   return (
-    <KeyboardAvoidingView 
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
-      style={styles.container}
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      className="flex-1 justify-between bg-slate-900 p-6"
     >
       <StatusBar barStyle="light-content" backgroundColor="#0f172a" />
-      
-      <View style={styles.headerContainer}>
-        <View style={styles.logoIcon}>
-          <Ionicons name="flash" size={32} color="#38bdf8" />
+
+      <View className="mt-14">
+        <View className="mb-5 h-16 w-16 items-center justify-center rounded-2xl border border-slate-700 bg-slate-800">
+          <Ionicons name="football-outline" size={34} color="#34d399" />
         </View>
-        <Text style={styles.title}>Bem-vindo de volta</Text>
-        <Text style={styles.subtitle}>Faça login para acessar sua conta</Text>
+        <Text className="mb-2 text-3xl font-bold text-slate-50">
+          Gestão Bola
+        </Text>
+        <Text className="text-base text-slate-400">
+          Faça login para acessar seu painel do atleta
+        </Text>
       </View>
 
-      <View style={styles.formContainer}>
-        {errorMessage ? (
-          <View style={styles.errorBox}>
-            <Ionicons name="alert-circle" size={18} color="#f87171" />
-            <Text style={styles.errorText}>{errorMessage}</Text>
-          </View>
-        ) : null}
-
-        <View style={styles.inputContainer}>
-          <Ionicons name="mail-outline" size={20} color="#94a3b8" style={styles.inputIcon} />
-          <TextInput
-            style={styles.input}
-            placeholder="Seu e-mail"
-            placeholderTextColor="#64748b"
-            value={email}
-            onChangeText={setEmail}
-            keyboardType="email-address"
-            autoCapitalize="none"
+      <View className="w-full">
+        <View className="mb-4">
+          <Text className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-slate-300">
+            E-mail do Atleta
+          </Text>
+          <Controller
+            control={control}
+            name="email"
+            render={({ field: { onChange, onBlur, value } }) => (
+              <View
+                className={`h-14 flex-row items-center rounded-xl border bg-slate-800 px-3.5 ${
+                  errors.email ? 'border-red-400' : 'border-slate-700'
+                }`}
+              >
+                <Ionicons
+                  name="mail-outline"
+                  size={20}
+                  color="#94a3b8"
+                  style={{ marginRight: 10 }}
+                />
+                <TextInput
+                  className="flex-1 text-base text-slate-50"
+                  placeholder="atleta@dominio.com"
+                  placeholderTextColor="#64748b"
+                  value={value}
+                  onBlur={onBlur}
+                  onChangeText={onChange}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                />
+              </View>
+            )}
           />
+          {errors.email?.message ? (
+            <View className="mt-1.5 flex-row items-center">
+              <Ionicons name="alert-circle" size={15} color="#f87171" />
+              <Text className="ml-1.5 text-xs font-medium text-red-400">
+                {errors.email.message}
+              </Text>
+            </View>
+          ) : null}
         </View>
 
-        <View style={styles.inputContainer}>
-          <Ionicons name="lock-closed-outline" size={20} color="#94a3b8" style={styles.inputIcon} />
-          <TextInput
-            style={styles.input}
-            placeholder="Sua senha"
-            placeholderTextColor="#64748b"
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry={!showPassword}
+        <View className="mb-3">
+          <Text className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-slate-300">
+            Senha
+          </Text>
+          <Controller
+            control={control}
+            name="password"
+            render={({ field: { onChange, onBlur, value } }) => (
+              <View
+                className={`h-14 flex-row items-center rounded-xl border bg-slate-800 px-3.5 ${
+                  errors.password ? 'border-red-400' : 'border-slate-700'
+                }`}
+              >
+                <Ionicons
+                  name="lock-closed-outline"
+                  size={20}
+                  color="#94a3b8"
+                  style={{ marginRight: 10 }}
+                />
+                <TextInput
+                  className="flex-1 text-base text-slate-50"
+                  placeholder="Mínimo de 6 caracteres"
+                  placeholderTextColor="#64748b"
+                  value={value}
+                  onBlur={onBlur}
+                  onChangeText={onChange}
+                  secureTextEntry={!showPassword}
+                />
+                <TouchableOpacity
+                  onPress={() => setShowPassword((prev) => !prev)}
+                  className="p-1"
+                >
+                  <Ionicons
+                    name={showPassword ? 'eye-outline' : 'eye-off-outline'}
+                    size={20}
+                    color="#94a3b8"
+                  />
+                </TouchableOpacity>
+              </View>
+            )}
           />
-          <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={styles.eyeIcon}>
-            <Ionicons 
-              name={showPassword ? "eye-outline" : "eye-off-outline"} 
-              size={20} 
-              color="#94a3b8" 
-            />
-          </TouchableOpacity>
+          {errors.password?.message ? (
+            <View className="mt-1.5 flex-row items-center">
+              <Ionicons name="alert-circle" size={15} color="#f87171" />
+              <Text className="ml-1.5 text-xs font-medium text-red-400">
+                {errors.password.message}
+              </Text>
+            </View>
+          ) : null}
         </View>
 
-        <TouchableOpacity style={styles.forgotPassword}>
-          <Text style={styles.forgotPasswordText}>Esqueceu a senha?</Text>
+        <TouchableOpacity className="mb-6 self-end">
+          <Text className="text-sm font-medium text-emerald-400">
+            Esqueceu a senha?
+          </Text>
         </TouchableOpacity>
 
-        <TouchableOpacity 
-          style={[styles.button, isLoading && styles.buttonDisabled]} 
-          onPress={handleLogin}
+        <TouchableOpacity
+          className={`h-14 items-center justify-center rounded-xl bg-emerald-600 ${
+            isLoading ? 'opacity-70' : ''
+          }`}
+          onPress={handleSubmit(onSubmit)}
           disabled={isLoading}
         >
           {isLoading ? (
             <ActivityIndicator color="#ffffff" />
           ) : (
-            <Text style={styles.buttonText}>Entrar</Text>
+            <Text className="text-base font-semibold text-white">Entrar</Text>
           )}
         </TouchableOpacity>
       </View>
 
-      <View style={styles.footerContainer}>
-        <Text style={styles.footerText}>Não tem uma conta? </Text>
-        <TouchableOpacity>
-          <Text style={styles.signupText}>Cadastre-se</Text>
-        </TouchableOpacity>
+      <View className="mb-5 flex-row justify-center">
+        <Text className="text-sm text-slate-400">Acesso da diretoria • </Text>
+        <Text className="text-sm font-semibold text-emerald-400">
+          Gestão Bola 2026
+        </Text>
       </View>
     </KeyboardAvoidingView>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#0f172a', // Tom elegante de azul escuro (Slate)
-    justifyContent: 'space-between',
-    padding: 24,
-  },
-  headerContainer: {
-    marginTop: 60,
-  },
-  logoIcon: {
-    width: 64,
-    height: 64,
-    borderRadius: 16,
-    backgroundColor: '#1e293b',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 20,
-    borderWidth: 1,
-    borderColor: '#334155',
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#f8fafc',
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 15,
-    color: '#94a3b8',
-  },
-  formContainer: {
-    width: '100%',
-  },
-  errorBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(248, 113, 113, 0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(248, 113, 113, 0.3)',
-    borderRadius: 10,
-    padding: 12,
-    marginBottom: 16,
-  },
-  errorText: {
-    color: '#f87171',
-    fontSize: 14,
-    marginLeft: 8,
-    fontWeight: '500',
-  },
-  inputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#1e293b',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#334155',
-    marginBottom: 16,
-    paddingHorizontal: 14,
-    height: 56,
-  },
-  inputIcon: {
-    marginRight: 10,
-  },
-  input: {
-    flex: 1,
-    color: '#f8fafc',
-    fontSize: 16,
-  },
-  eyeIcon: {
-    padding: 4,
-  },
-  forgotPassword: {
-    alignSelf: 'flex-end',
-    marginBottom: 24,
-  },
-  forgotPasswordText: {
-    color: '#38bdf8',
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  button: {
-    height: 56,
-    backgroundColor: '#0284c7',
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#0284c7',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  buttonDisabled: {
-    backgroundColor: '#0369a1',
-    opacity: 0.7,
-  },
-  buttonText: {
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  footerContainer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    marginBottom: 20,
-  },
-  footerText: {
-    color: '#94a3b8',
-    fontSize: 14,
-  },
-  signupText: {
-    color: '#38bdf8',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-});
