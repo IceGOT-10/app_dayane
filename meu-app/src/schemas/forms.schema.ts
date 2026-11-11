@@ -11,7 +11,7 @@
 import { z } from 'zod';
 
 import {
-  DATE_BR_REGEX,
+  isValidBrazilianDate,
   PHONE_BR_REGEX,
   TIME_24H_REGEX,
   validateGuestName,
@@ -135,8 +135,8 @@ export const gameFormSchema = z.object({
   date: z
     .string()
     .trim()
-    .refine((val) => DATE_BR_REGEX.test(val), {
-      message: 'Data inválida. Use o formato DD/MM/AAAA (ex: 15/09/2026).',
+    .refine((val) => isValidBrazilianDate(val), {
+      message: 'Data inválida. Use uma data real no formato DD/MM/AAAA (ex: 15/09/2026).',
     }),
   time: z
     .string()

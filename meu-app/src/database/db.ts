@@ -247,6 +247,44 @@ function safeJsonParse<T>(raw: string | null | undefined, fallback: T): T {
 }
 
 /**
+ * Fila de escrita do SQLite (correção de condição de corrida).
+ *
+ * PROBLEMA ORIGINAL: o Zustand dispara várias gravações com `void saveXToDb(...)` sem aguardar.
+ * Cada gravação faz `DELETE` + vários `INSERT`; se duas chamadas rodassem ao mesmo tempo, o
+ * `DELETE` da segunda apagava linhas no meio dos `INSERT` da primeira e causava erro de chave
+ * primária duplicada (UNIQUE constraint) em uma promessa sem tratamento.
+ *
+ * SOLUÇÃO: encadeamos cada escrita na promessa anterior (execução estritamente sequencial) e
+ * envolvemos `DELETE` + `INSERT`s em uma transação (`withTransactionAsync`), que é atômica:
+ * ou grava tudo ou desfaz tudo, nunca deixando a tabela pela metade.
+ */
+let sqliteWriteQueue: Promise<void> = Promise.resolve();
+
+function enqueueSqliteWrite(
+  label: string,
+  task: (db: SQLite.SQLiteDatabase) => Promise<void>
+): Promise<void> {
+  const run = async (): Promise<void> => {
+    const db = await getSqliteDb();
+    if (!db) {
+      return;
+    }
+    try {
+      await db.withTransactionAsync(async () => {
+        await task(db);
+      });
+    } catch (error: unknown) {
+      // Falha de persistência não pode derrubar o app: registramos o diagnóstico e seguimos.
+      console.error(`[db] Falha ao gravar "${label}" no SQLite:`, error);
+    }
+  };
+
+  const next = sqliteWriteQueue.then(run);
+  sqliteWriteQueue = next;
+  return next;
+}
+
+/**
  * Persiste a lista de atletas no SQLite e no AsyncStorage.
  */
 export async function savePlayersToDb(players: Player[]): Promise<void> {
@@ -256,29 +294,26 @@ export async function savePlayersToDb(players: Player[]): Promise<void> {
     // Ignora falha silenciosa de cache secundário
   }
 
-  const db = await getSqliteDb();
-  if (!db) {
-    return;
-  }
-
-  await db.execAsync('DELETE FROM players;');
-  for (const p of players) {
-    await db.runAsync(
-      `INSERT INTO players (id, name, email, password, phone, joinedAt, position, shirtNumber, membershipStatus, role, isActive)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
-      p.id,
-      p.name,
-      p.email,
-      p.password,
-      p.phone,
-      p.joinedAt,
-      p.position,
-      p.shirtNumber,
-      p.membershipStatus,
-      p.role,
-      p.isActive ? 1 : 0
-    );
-  }
+  await enqueueSqliteWrite('players', async (db) => {
+    await db.runAsync('DELETE FROM players;');
+    for (const p of players) {
+      await db.runAsync(
+        `INSERT INTO players (id, name, email, password, phone, joinedAt, position, shirtNumber, membershipStatus, role, isActive)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+        p.id,
+        p.name,
+        p.email,
+        p.password,
+        p.phone,
+        p.joinedAt,
+        p.position,
+        p.shirtNumber,
+        p.membershipStatus,
+        p.role,
+        p.isActive ? 1 : 0
+      );
+    }
+  });
 }
 
 /**
@@ -291,35 +326,32 @@ export async function saveGamesToDb(games: Game[]): Promise<void> {
     // Ignora falha silenciosa de cache secundário
   }
 
-  const db = await getSqliteDb();
-  if (!db) {
-    return;
-  }
-
-  await db.execAsync('DELETE FROM games;');
-  for (const g of games) {
-    await db.runAsync(
-      `INSERT INTO games (id, title, competition, phase, status, date, time, location, homeTeam, awayTeam, courtCost, maxGuestsPerGame, homeScore, awayScore, scorersJson, declinedPlayersJson, attendanceJson)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
-      g.id,
-      g.title,
-      g.competition,
-      g.phase,
-      g.status,
-      g.date,
-      g.time,
-      g.location,
-      g.homeTeam,
-      g.awayTeam,
-      g.courtCost,
-      g.maxGuestsPerGame,
-      g.homeScore ?? null,
-      g.awayScore ?? null,
-      JSON.stringify(g.scorers ?? []),
-      JSON.stringify(g.declinedPlayers ?? []),
-      JSON.stringify(g.attendance)
-    );
-  }
+  await enqueueSqliteWrite('games', async (db) => {
+    await db.runAsync('DELETE FROM games;');
+    for (const g of games) {
+      await db.runAsync(
+        `INSERT INTO games (id, title, competition, phase, status, date, time, location, homeTeam, awayTeam, courtCost, maxGuestsPerGame, homeScore, awayScore, scorersJson, declinedPlayersJson, attendanceJson)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+        g.id,
+        g.title,
+        g.competition,
+        g.phase,
+        g.status,
+        g.date,
+        g.time,
+        g.location,
+        g.homeTeam,
+        g.awayTeam,
+        g.courtCost,
+        g.maxGuestsPerGame,
+        g.homeScore ?? null,
+        g.awayScore ?? null,
+        JSON.stringify(g.scorers ?? []),
+        JSON.stringify(g.declinedPlayers ?? []),
+        JSON.stringify(g.attendance)
+      );
+    }
+  });
 }
 
 /**
@@ -332,26 +364,23 @@ export async function saveGuestsToDb(guests: Guest[]): Promise<void> {
     // Ignora falha silenciosa de cache secundário
   }
 
-  const db = await getSqliteDb();
-  if (!db) {
-    return;
-  }
-
-  await db.execAsync('DELETE FROM guests;');
-  for (const guest of guests) {
-    await db.runAsync(
-      `INSERT INTO guests (id, name, date, game, status, invitedByPlayerId, invitedByPlayerName, guestFee)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?);`,
-      guest.id,
-      guest.name,
-      guest.date,
-      guest.game,
-      guest.status,
-      guest.invitedByPlayerId ?? null,
-      guest.invitedByPlayerName ?? null,
-      guest.guestFee ?? 20
-    );
-  }
+  await enqueueSqliteWrite('guests', async (db) => {
+    await db.runAsync('DELETE FROM guests;');
+    for (const guest of guests) {
+      await db.runAsync(
+        `INSERT INTO guests (id, name, date, game, status, invitedByPlayerId, invitedByPlayerName, guestFee)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?);`,
+        guest.id,
+        guest.name,
+        guest.date,
+        guest.game,
+        guest.status,
+        guest.invitedByPlayerId ?? null,
+        guest.invitedByPlayerName ?? null,
+        guest.guestFee ?? 20
+      );
+    }
+  });
 }
 
 /**
@@ -366,26 +395,23 @@ export async function saveFinancialMetricsToDb(
     // Ignora falha silenciosa de cache secundário
   }
 
-  const db = await getSqliteDb();
-  if (!db) {
-    return;
-  }
-
-  await db.execAsync('DELETE FROM financial_metrics;');
-  for (const m of metrics) {
-    await db.runAsync(
-      `INSERT INTO financial_metrics (id, playerId, referenceMonth, monthlyFee, penaltiesCount, penaltiesAmount, paymentsMade, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?);`,
-      m.id,
-      m.playerId,
-      m.referenceMonth,
-      m.monthlyFee,
-      m.penaltiesCount,
-      m.penaltiesAmount,
-      m.paymentsMade,
-      m.status
-    );
-  }
+  await enqueueSqliteWrite('financial_metrics', async (db) => {
+    await db.runAsync('DELETE FROM financial_metrics;');
+    for (const m of metrics) {
+      await db.runAsync(
+        `INSERT INTO financial_metrics (id, playerId, referenceMonth, monthlyFee, penaltiesCount, penaltiesAmount, paymentsMade, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?);`,
+        m.id,
+        m.playerId,
+        m.referenceMonth,
+        m.monthlyFee,
+        m.penaltiesCount,
+        m.penaltiesAmount,
+        m.paymentsMade,
+        m.status
+      );
+    }
+  });
 }
 
 /**
@@ -403,25 +429,22 @@ export async function saveTransactionsToDb(
     // Ignora falha silenciosa de cache secundário
   }
 
-  const db = await getSqliteDb();
-  if (!db) {
-    return;
-  }
-
-  await db.execAsync('DELETE FROM transactions;');
-  for (const tx of transactions) {
-    await db.runAsync(
-      `INSERT INTO transactions (id, playerId, type, description, amount, method, createdAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?);`,
-      tx.id,
-      tx.playerId,
-      tx.type,
-      tx.description,
-      tx.amount,
-      tx.method,
-      tx.createdAt
-    );
-  }
+  await enqueueSqliteWrite('transactions', async (db) => {
+    await db.runAsync('DELETE FROM transactions;');
+    for (const tx of transactions) {
+      await db.runAsync(
+        `INSERT INTO transactions (id, playerId, type, description, amount, method, createdAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?);`,
+        tx.id,
+        tx.playerId,
+        tx.type,
+        tx.description,
+        tx.amount,
+        tx.method,
+        tx.createdAt
+      );
+    }
+  });
 }
 
 /**
@@ -439,24 +462,21 @@ export async function saveDocumentsToDb(
     // Ignora falha silenciosa de cache secundário
   }
 
-  const db = await getSqliteDb();
-  if (!db) {
-    return;
-  }
-
-  await db.execAsync('DELETE FROM documents;');
-  for (const doc of documents) {
-    await db.runAsync(
-      `INSERT INTO documents (id, title, category, size, updatedAt, content)
-       VALUES (?, ?, ?, ?, ?, ?);`,
-      doc.id,
-      doc.title,
-      doc.category,
-      doc.size,
-      doc.updatedAt,
-      doc.content
-    );
-  }
+  await enqueueSqliteWrite('documents', async (db) => {
+    await db.runAsync('DELETE FROM documents;');
+    for (const doc of documents) {
+      await db.runAsync(
+        `INSERT INTO documents (id, title, category, size, updatedAt, content)
+         VALUES (?, ?, ?, ?, ?, ?);`,
+        doc.id,
+        doc.title,
+        doc.category,
+        doc.size,
+        doc.updatedAt,
+        doc.content
+      );
+    }
+  });
 }
 
 /**

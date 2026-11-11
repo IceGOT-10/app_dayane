@@ -41,6 +41,30 @@ const EMAIL_FORMAT_REGEX = /^[^\s@]+@[^\s@]+\.[A-Za-z]{2,}$/;
 export const DATE_BR_REGEX = /^(0[1-9]|[12]\d|3[01])\/(0[1-9]|1[0-2])\/\d{4}$/;
 
 /**
+ * Valida se a string é uma data REAL no formato DD/MM/AAAA.
+ *
+ * A regex `DATE_BR_REGEX` só confere o "formato" (aceita 31/02/2026 e 31/04/2026, que não existem).
+ * Aqui criamos um objeto `Date` com os números informados e conferimos se o JavaScript manteve
+ * dia, mês e ano: se a data fosse inválida, ele "rolaria" para o mês seguinte (ex.: 31/02 → 03/03).
+ */
+export function isValidBrazilianDate(value: string): boolean {
+  const trimmed = (value ?? '').trim();
+  if (!DATE_BR_REGEX.test(trimmed)) {
+    return false;
+  }
+  const [dayText, monthText, yearText] = trimmed.split('/');
+  const day = Number(dayText);
+  const month = Number(monthText);
+  const year = Number(yearText);
+  const parsed = new Date(year, month - 1, day);
+  return (
+    parsed.getFullYear() === year &&
+    parsed.getMonth() === month - 1 &&
+    parsed.getDate() === day
+  );
+}
+
+/**
  * Expressão Regular para horário no formato 24h HH:mm.
  */
 export const TIME_24H_REGEX = /^([01]\d|2[0-3]):([0-5]\d)$/;

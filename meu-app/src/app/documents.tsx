@@ -21,18 +21,39 @@ import { BrandColors, Fonts, Spacing } from '@/constants/theme';
 import { useAppStore } from '@/store/useAppStore';
 import type { ClubDocument } from '@/types/ball-management';
 
+/**
+ * Escapa caracteres especiais de HTML (`& < > " '`) antes de inserir texto no PDF.
+ * Sem isso, um documento contendo "<" ou "&" quebraria a estrutura HTML gerada
+ * (e seria interpretado como marcação em vez de texto).
+ */
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function buildDocumentHtml(doc: ClubDocument): string {
   const escapedParagraphs = doc.content
     .split('\n')
-    .map((line) => `<p style="margin: 6px 0; line-height: 1.5;">${line}</p>`)
+    .map(
+      (line) =>
+        `<p style="margin: 6px 0; line-height: 1.5;">${escapeHtml(line)}</p>`
+    )
     .join('');
+  const safeTitle = escapeHtml(doc.title);
+  const safeCategory = escapeHtml(doc.category);
+  const safeUpdatedAt = escapeHtml(doc.updatedAt);
+  const safeSize = escapeHtml(doc.size);
 
   return `
     <!DOCTYPE html>
     <html lang="pt-BR">
       <head>
         <meta charset="utf-8" />
-        <title>${doc.title} - Gestão Bola</title>
+        <title>${safeTitle} - Gestão Bola</title>
         <style>
           body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -70,8 +91,8 @@ function buildDocumentHtml(doc: ClubDocument): string {
       <body>
         <div class="header">
           <div class="brand">Associação Esportiva Gestão Bola</div>
-          <h1>${doc.title}</h1>
-          <div class="meta">${doc.category} • Atualizado em ${doc.updatedAt} (${doc.size})</div>
+          <h1>${safeTitle}</h1>
+          <div class="meta">${safeCategory} • Atualizado em ${safeUpdatedAt} (${safeSize})</div>
         </div>
         <div class="content">${escapedParagraphs}</div>
       </body>

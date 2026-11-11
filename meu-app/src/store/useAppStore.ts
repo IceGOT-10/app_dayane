@@ -715,6 +715,21 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
 
     const state = get();
+
+    // Convidados são vinculados à partida pelo TÍTULO; dois jogos com o mesmo título
+    // misturariam convidados, quórum de convites e rateio. Por isso o título deve ser único.
+    const titleAlreadyUsed = state.games.some(
+      (g) => g.title.trim().toLowerCase() === input.title.trim().toLowerCase()
+    );
+    if (titleAlreadyUsed) {
+      return {
+        isValid: false,
+        errorMessage:
+          'Já existe uma partida com este título. Use um nome diferente (ex: inclua a data).',
+        sanitizedValue: null,
+      };
+    }
+
     const newGame: Game = {
       id: `game-${Date.now()}`,
       title: input.title.trim(),
@@ -770,6 +785,20 @@ export const useAppStore = create<AppState>((set, get) => ({
       };
     }
 
+    const titleUsedByAnotherGame = state.games.some(
+      (g) =>
+        g.id !== gameId &&
+        g.title.trim().toLowerCase() === input.title.trim().toLowerCase()
+    );
+    if (titleUsedByAnotherGame) {
+      return {
+        isValid: false,
+        errorMessage:
+          'Já existe outra partida com este título. Use um nome diferente.',
+        sanitizedValue: null,
+      };
+    }
+
     const updatedGame: Game = {
       ...existing,
       title: input.title.trim(),
@@ -786,18 +815,22 @@ export const useAppStore = create<AppState>((set, get) => ({
       g.id === gameId ? updatedGame : g
     );
 
-    const updatedGuests =
-      existing.title !== updatedGame.title
-        ? state.guests.map((guest) =>
-            guest.game === existing.title
-              ? { ...guest, game: updatedGame.title, date: updatedGame.date }
-              : guest
-          )
-        : state.guests;
+    // Os convidados guardam o título e a data da partida; se qualquer um mudou,
+    // sincronizamos para que a cota mensal (1 convidado/mês) use a data correta.
+    const gameIdentityChanged =
+      existing.title !== updatedGame.title || existing.date !== updatedGame.date;
+
+    const updatedGuests = gameIdentityChanged
+      ? state.guests.map((guest) =>
+          guest.game === existing.title
+            ? { ...guest, game: updatedGame.title, date: updatedGame.date }
+            : guest
+        )
+      : state.guests;
 
     set({ games: updatedGames, guests: updatedGuests });
     void saveGamesToDb(updatedGames);
-    if (existing.title !== updatedGame.title) {
+    if (gameIdentityChanged) {
       void saveGuestsToDb(updatedGuests);
     }
 
@@ -819,13 +852,26 @@ export const useAppStore = create<AppState>((set, get) => ({
       };
     }
 
+    // Marcar "Finalizada" encerra a partida; desmarcar numa partida já finalizada a reabre
+    // (antes, desmarcar a caixa era ignorado em silêncio e a partida seguia "Finalizado").
+    const nextPhase: Game['phase'] = input.markFinished
+      ? 'finished'
+      : existing.phase === 'finished'
+        ? 'ongoing'
+        : existing.phase;
+    const nextStatus: Game['status'] = input.markFinished
+      ? 'Finalizado'
+      : existing.phase === 'finished'
+        ? 'Em aberto'
+        : existing.status;
+
     const updatedGame: Game = {
       ...existing,
       homeScore: Math.max(0, Math.floor(input.homeScore)),
       awayScore: Math.max(0, Math.floor(input.awayScore)),
       scorers: input.scorers,
-      phase: input.markFinished ? 'finished' : existing.phase,
-      status: input.markFinished ? 'Finalizado' : existing.status,
+      phase: nextPhase,
+      status: nextStatus,
     };
 
     const updatedGames = state.games.map((g) =>

@@ -98,6 +98,15 @@ Este diário registra as mudanças realizadas no projeto para facilitar a elabor
   - O arquivo Web roda puramente com `@react-native-async-storage/async-storage`, eliminando o carregamento dos Web Workers nativos do `expo-sqlite` no navegador e assegurando execução sem erros tanto no Expo Go móvel quanto na Web.
 - **Correção de Hidratação HTML na Web (`documents.tsx`)**:
   - Remoção do aninhamento inválido de `<Pressable accessibilityRole="button">` dentro de outro `<Pressable>` nos cards de documentos em `meu-app/src/app/documents.tsx`, separando a área de leitura e o botão de geração de PDF em elementos irmãos.
+- **Protocolo de Busca de Erros e Bugs (10/11/2026)**:
+  - Verificações executadas: `npx tsc --noEmit` (0 erros), `npx expo lint` (0 avisos), `npx expo-doctor` (21/21) e `npx expo export --platform web` (build de produção).
+  - **Condição de corrida no SQLite** (`src/database/db.ts`): as gravações disparadas com `void saveXToDb()` rodavam em paralelo (`DELETE` + `INSERT`) e podiam gerar erro de chave duplicada sem tratamento. Agora passam por uma fila sequencial (`enqueueSqliteWrite`) e por uma transação atômica (`withTransactionAsync`), com `console.error` em caso de falha.
+  - **Validação de datas** (`src/utils/validations.ts` e `src/schemas/forms.schema.ts`): a regex aceitava datas inexistentes (ex.: `31/02/2026`). Criada `isValidBrazilianDate`, que confere se a data realmente existe, usada no `gameFormSchema`.
+  - **HTML do PDF sem escape** (`src/app/documents.tsx`): textos com `<`, `>` ou `&` quebravam o HTML. Criada `escapeHtml`, aplicada ao título, categoria, tamanho e conteúdo.
+  - **Títulos de partida duplicados** (`src/store/useAppStore.ts`): como convidados são vinculados à partida pelo título, `createGame` e `updateGame` agora rejeitam títulos repetidos.
+  - **Data dos convidados desatualizada** (`updateGame`): ao mudar só a data da partida, os convidados mantinham a data antiga e a cota mensal era calculada errada. Agora sincroniza quando título **ou** data mudam.
+  - **Reabrir partida finalizada** (`updateGameScore`): desmarcar "Encerrar partida" numa partida finalizada era ignorado; agora ela volta para "Em andamento".
+  - **Identidade visual (R7)**: `name` em `app.json` alterado de `meu-app` para `Gestão Bola`.
 
 ---
 
