@@ -10,6 +10,7 @@ package-lock.json.backup
 dist/
 web-build/
 expo-env.d.ts
+/app_dayane-main/meu-app.rar
 
 # Pastas nativas geradas
 /ios/
@@ -40,4 +41,3 @@ yarn-error.*
 # Arquivos do Sistema Operacional
 .DS_Store
 Thumbs.db
-
